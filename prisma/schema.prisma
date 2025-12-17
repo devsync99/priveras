@@ -1,0 +1,112 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  piaProjects PIAProject[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  used      Boolean  @default(false)
+  
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@map("password_reset_tokens")
+}
+
+model PIAProject {
+  id           String   @id @default(cuid())
+  userId       String
+  projectTitle String
+  status       String   @default("Draft")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  completedAt  DateTime?
+  documentsUploaded Boolean @default(false)
+  uploadedFiles Json?    // Array of {name, type, size, uploadedAt}
+  acceptedDrafts Json?   // Array of {content, acceptedAt, messageId} for accepted drafts
+  
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sections PIASection[]
+  
+  @@index([userId])
+  @@map("pia_projects")
+}
+
+model PIASection {
+  id           String   @id @default(cuid())
+  projectId    String
+  sectionType  String   // "project_description", "privacy_analysis", "risk_assessment", "appendix_d", "custom"
+  sectionName  String   // Display name for the section
+  content      String   @db.Text // Generated content
+  status       String   @default("Draft") // "Draft", "Review", "Approved", "Rejected"
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  generatedBy  String?  // User ID or "AI"
+  
+  // Relations
+  project PIAProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  history PIASectionHistory[]
+  
+  @@index([projectId])
+  @@index([sectionType])
+  @@map("pia_sections")
+}
+
+model PIASectionHistory {
+  id              String   @id @default(cuid())
+  sectionId       String
+  content         String   @db.Text
+  version         Int
+  modifiedBy      String?
+  modificationQuery String? @db.Text // The query used to modify the section
+  createdAt       DateTime @default(now())
+  
+  // Relations
+  section PIASection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  @@index([sectionId])
+  @@map("pia_section_history")
+}
+
+model PIAChatMessage {
+  id           String   @id @default(cuid())
+  projectId    String
+  type         String   // "user" or "assistant"
+  content      String   @db.Text
+  attachments  Json?    // Array of {name, type, size} for attached files
+  actions      Json?    // Array of {label, value} for action buttons
+  status       String?  // "pending", "completed", "error"
+  isActionResponse Boolean @default(false)
+  isDraftAccepted Boolean @default(false)
+  isSectionSteps Boolean @default(false)
+  createdAt    DateTime @default(now())
+  
+  @@index([projectId])
+  @@map("pia_chat_messages")
+}
