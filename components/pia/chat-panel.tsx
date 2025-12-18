@@ -147,20 +147,15 @@ export function ChatPanel({
     },
     { label: "8. Access Controls", value: "Access Controls" },
     { label: "9. Security Assessments", value: "Security Assessments" },
-
     {
-      label: "10. Privacy Roles & Responsibilities",
-      value: "Privacy Roles & Responsibilities",
-    },
-    {
-      label: "11. Privacy Summary or Analysis",
+      label: "10. Privacy Summary or Analysis",
       value: "Privacy Summary or Analysis",
     },
     {
-      label: "12. Risk Assessment & Mitigation",
+      label: "11. Risk Assessment & Mitigation",
       value: "Risk Assessment & Mitigation",
     },
-    { label: "13. Appendices", value: "Appendices" },
+    { label: "12. Appendices", value: "Appendices" },
   ];
 
   const formatTime = (date: Date) => {

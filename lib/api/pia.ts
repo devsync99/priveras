@@ -101,7 +101,9 @@ export const piaApi = {
   ): Promise<string> => {
     const response = await fetch(`${PIA_API_BASE_URL}/pia/modify`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         pia_name: piaName,
         section,
@@ -110,16 +112,29 @@ export const piaApi = {
       }),
     });
 
+    const rawText = await response.text();
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
       throw new Error(
-        errorData.error || `Failed to modify PIA response: ${response.statusText}`
+        `PIA modify failed (${response.status}): ${rawText || response.statusText
+        }`
       );
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error("PIA modify returned non-JSON success response");
+    }
+
+    if (!data?.response) {
+      throw new Error("PIA modify response missing `response` field");
+    }
+
     return data.response;
   },
+
 
   /**
    * Complete a PIA and delete all associated documents from Qdrant.
