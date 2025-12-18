@@ -146,19 +146,21 @@ export function ChatPanel({
       value: "Data Flow & Data Handling",
     },
     { label: "8. Access Controls", value: "Access Controls" },
+    { label: "9. Security Assessments", value: "Security Assessments" },
+
     {
-      label: "9. Privacy Roles & Responsibilities",
+      label: "10. Privacy Roles & Responsibilities",
       value: "Privacy Roles & Responsibilities",
     },
     {
-      label: "10. Privacy Summary or Analysis",
+      label: "11. Privacy Summary or Analysis",
       value: "Privacy Summary or Analysis",
     },
     {
-      label: "11. Risk Assessment & Mitigation",
+      label: "12. Risk Assessment & Mitigation",
       value: "Risk Assessment & Mitigation",
     },
-    { label: "12. Appendices", value: "Appendices" },
+    { label: "13. Appendices", value: "Appendices" },
   ];
 
   const formatTime = (date: Date) => {
