@@ -44,7 +44,7 @@ export async function login(formData: FormData) {
   (await cookies()).set("session", session, {
     expires,
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: false,
     sameSite: "lax",
   });
 
@@ -81,7 +81,7 @@ export async function signup(formData: FormData) {
   (await cookies()).set("session", session, {
     expires,
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: false,
     sameSite: "lax",
   });
 
@@ -112,7 +112,7 @@ export async function updateSession(request: NextRequest) {
       name: "session",
       value: await encrypt(parsed),
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: false,
       sameSite: "lax",
       expires: parsed.expires,
     });
