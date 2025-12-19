@@ -42,6 +42,7 @@ import ModifyAnswerPanel from "./modify-answer-panel";
 import { parseContent } from "@/lib/docx/parseContent";
 import { buildDocxBlocks } from "@/lib/docx/buildDocx";
 import { buildCoverPage, buildFooter } from "@/lib/docx/cover";
+import { PiaProgressResponse } from "@/lib/types";
 
 interface ChatPanelProps {
   session: any;
@@ -112,6 +113,8 @@ export function ChatPanel({
   const [isModifyPanelOpen, setIsModifyPanelOpen] = useState(false);
   const [previousResponse, setPreviousResponse] = useState<string>("");
   const [acceptedMessages, setAcceptedMessages] = useState<string[]>([]);
+  const [piaProgressMsg, setPiaProgressMsg] = useState("");
+  const [showProgressMsg, setShowProgressMsg] = useState(false);
 
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -511,14 +514,8 @@ The modifications have been successfully saved. I am ready for the next step. Pl
   };
 
   const handleModifyAnswer = (message: Message) => {
-    if (!selectedSectionInfo?.value) {
-      toast.error("No pia section selected", {
-        description: "Please select a pia section to modify the answer",
-      });
-    } else {
-      setIsModifyPanelOpen(true);
-      setPreviousResponse(message.content);
-    }
+    setIsModifyPanelOpen(true);
+    setPreviousResponse(message.content);
   };
 
   const handleCompletePIA = async (message: Message) => {
@@ -574,70 +571,90 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     }
   };
 
+  const pollPiaProgress = (
+    sessionId: string,
+    onUpdate: (progress: PiaProgressResponse) => void
+  ) => {
+    const intervalId = setInterval(async () => {
+      try {
+        const progress = await piaApi.getPIAProgress(sessionId);
+        onUpdate(progress);
+      } catch (err) {
+        console.error("Progress polling failed:", err);
+      }
+    }, 1000);
+
+    // return a stop function
+    return () => clearInterval(intervalId);
+  };
+
+
+
   const handleExecutePIA = async () => {
     if (attachedFiles.length === 0) {
-      toast.error("No files to process", {
-        description: "Please upload documents first",
-      });
+      toast.error("No files to process", { description: "Please upload documents first" });
       return;
     }
-
     if (!selectedProject) {
-      toast.error("No project selected", {
-        description: "Please select a project to execute PIA",
-      });
+      toast.error("No project selected", { description: "Please select a project to execute PIA" });
       return;
     }
 
     setIsLoading(true);
+    setShowProgressMsg(true);
+
+    let stopPolling: (() => void) | null = null;
 
     try {
-      toast.info("Processing documents", {
-        description: `${attachedFiles.length} file(s) uploaded`,
+      toast.info("Processing documents", { description: `${attachedFiles.length} file(s) uploaded.` });
+
+      // start polling
+      stopPolling = pollPiaProgress(selectedProject, (progress) => {
+        if (progress.status_list?.length > 0) {
+          const latestMsg = progress.status_list[progress.status_list.length - 1];
+          setPiaProgressMsg(latestMsg);
+        }
       });
 
-      // Single API call for all files
-      const response = await piaApi.startPIA(attachedFiles, selectedProject);
+      // start PIA
+      await piaApi.startPIA(attachedFiles, selectedProject);
 
+      // stop polling when done
+      stopPolling?.();
+
+      // rest of your success logic
       const totalFiles = attachedFiles.length;
       setAttachedFiles([]);
       setHasUploadedFiles(true);
 
-      // Update project status
-      try {
-        await fetch(`/api/projects/${selectedProject}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "In Progress" }),
-        });
-
-        onProjectUpdate?.();
-      } catch (statusError) {
-        console.error("Failed to update project status:", statusError);
-      }
-
-      const aiResponse: Message = {
-        id: Date.now().toString(),
-        type: "assistant",
-        content: `All ${totalFiles} document(s) have been successfully processed and analyzed. The system is now ready to generate PIA sections. You can select a section from the buttons below or enter a custom query.`,
-        timestamp: new Date(),
-        status: "completed",
-      };
-
-      setMessages((prev) => [...prev, aiResponse]);
-      saveMessageToDb(aiResponse);
-
-      toast.success("PIA Execution Complete", {
-        description: `All ${totalFiles} document(s) processed successfully`,
+      await fetch(`/api/projects/${selectedProject}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "In Progress" }),
       });
+
+      onProjectUpdate?.();;
+
+
+      await piaChatApi.saveMessage({
+        projectId: selectedProject!,
+        type: "assistant",
+        content: `All ${totalFiles} document(s) have been successfully processed and analyzed. I am ready for the next step. Please select the **next mandatory section** you need to generate and review for your PIA template.`,
+        status: "completed",
+        isSectionSteps: true,
+      });
+
+
+      toast.success("PIA Execution Complete", { description: `All ${totalFiles} document(s) processed successfully` });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
+      stopPolling?.(); // ensure polling stops on error
+
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 
       const errorResponse: Message = {
         id: Date.now().toString(),
         type: "assistant",
-        content: `Failed to execute PIA: ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+        content: `Failed to execute PIA: ${errorMessage}`,
         timestamp: new Date(),
         status: "error",
       };
@@ -645,13 +662,16 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       setMessages((prev) => [...prev, errorResponse]);
       saveMessageToDb(errorResponse);
 
-      toast.error("Failed to execute PIA", {
-        description: errorMessage,
-      });
+      toast.error("Failed to execute PIA", { description: errorMessage });
     } finally {
       setIsLoading(false);
+      setShowProgressMsg(false);
+      setPiaProgressMsg("")
+      await loadChatHistory();
     }
   };
+
+
 
 
   const getUploadedFilesContext = (): string => {
@@ -902,8 +922,8 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
                 <div
                   className={`flex flex-col ${message.content.includes("---SECTION_BREAK---")
-                      ? "w-full max-w-full"
-                      : "max-w-[85%] sm:max-w-xl lg:max-w-2xl"
+                    ? "w-full max-w-full"
+                    : "max-w-[85%] sm:max-w-xl lg:max-w-2xl"
                     } ${message.type === "user" ? "items-end" : "items-start"}`}
                 >
                   <div
@@ -968,8 +988,8 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                     ) : (
                       <div
                         className={`text-sm leading-relaxed ${message.type === "user"
-                            ? ""
-                            : "prose prose-sm max-w-none"
+                          ? ""
+                          : "prose prose-sm max-w-none"
                           }`}
                       >
                         <ReactMarkdown
@@ -1084,9 +1104,6 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                     message.isSectionSteps &&
                     !message.actions &&
                     message.status === "completed" &&
-                    !message.content.includes(
-                      "successfully processed and analyzed"
-                    ) &&
                     !(
                       message.attachments && message.attachments.length > 0
                     ) && (
@@ -1142,12 +1159,46 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                 <div className="w-10 h-10 bg-linear-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shrink-0">
                   <Bot className="w-6 h-6 text-white" />
                 </div>
-                <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl">
-                  <Loader2 className="w-5 h-5 animate-spin text-gray-600 dark:text-gray-400" />
-                </div>
+
+                {showProgressMsg ? (
+
+                  <div className="flex-1 px-1 py-3">
+
+                    {/* AI Reasoning / Thinking Animated Text */}
+                    <p
+                      className="text-[13px] font-semibold"
+                      style={{
+                        background: "linear-gradient(90deg, #8f8f8f, #c7c7c7, #8f8f8f)",
+                        backgroundSize: "200% 100%",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        animation: "gradientMove 2s linear infinite",
+                      }}
+                    >
+                      {piaProgressMsg
+                        ? piaProgressMsg
+                        : "Analyzing the Docs..."}
+                    </p>
+
+
+                    {/* Inline animation style */}
+                    <style>
+                      {`
+        @keyframes gradientMove {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        `}
+                    </style>
+                  </div>
+                ) : (
+                  <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl">
+                    <Loader2 className="w-5 h-5 animate-spin text-gray-600 dark:text-gray-400" />
+                  </div>
+
+                )}
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </>
         )}
@@ -1284,7 +1335,6 @@ The modifications have been successfully saved. I am ready for the next step. Pl
         onClose={() => setIsModifyPanelOpen(false)}
         piaName={projectId}
         previousResponse={previousResponse}
-        section={selectedSectionInfo?.value || ""}
         onModified={async (newResponse) => {
           // refresh chat history
           await loadChatHistory();

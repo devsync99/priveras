@@ -8,7 +8,6 @@ interface ModifyAnswerPanelProps {
   onClose: () => void;
   piaName?: string;
   previousResponse: string;
-  section: string;
   onModified?: (response: string) => void;
 }
 
@@ -17,7 +16,6 @@ function ModifyAnswerPanel({
   onClose,
   piaName,
   previousResponse,
-  section,
   onModified,
 }: ModifyAnswerPanelProps) {
   const [modifiedText, setModifiedText] = useState("");
@@ -43,7 +41,6 @@ function ModifyAnswerPanel({
     try {
       const { response } = await piaChatApi.modifyResponse({
         pia_name: piaName,
-        section,
         previous_response: previousResponse,
         modification_query: modifiedText.trim(),
         projectId: piaName,

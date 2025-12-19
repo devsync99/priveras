@@ -14,7 +14,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       pia_name,
-      section,
       previous_response,
       modification_query,
       projectId,
@@ -22,7 +21,6 @@ export async function POST(request: NextRequest) {
 
     if (
       !pia_name ||
-      !section ||
       !previous_response ||
       !modification_query ||
       !projectId
@@ -36,7 +34,6 @@ export async function POST(request: NextRequest) {
     // 1. Call external PIA API
     const modifiedResponse = await piaApi.modifyPiaResponse(
       pia_name,
-      section,
       previous_response,
       modification_query
     );

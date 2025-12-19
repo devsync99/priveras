@@ -5,6 +5,7 @@ import type {
   GeneratePIARequest,
   CompletePIAResponse,
   ChatResponse,
+  PiaProgressResponse,
 } from "@/lib/types";
 
 const PIA_API_BASE_URL =
@@ -95,7 +96,6 @@ export const piaApi = {
   // Modify PIA response (string-based response)
   modifyPiaResponse: async (
     piaName: string,
-    section: string,
     previousResponse: string,
     modificationQuery: string
   ): Promise<string> => {
@@ -106,7 +106,7 @@ export const piaApi = {
       },
       body: JSON.stringify({
         pia_name: piaName,
-        section,
+        session_id: piaName,
         previous_response: previousResponse,
         modification_query: modificationQuery,
       }),
@@ -216,4 +216,35 @@ export const piaApi = {
 
     return response.json();
   },
+
+
+  /**
+ * Get progress of an ongoing PIA generation session
+ *
+ * @param sessionId - PIA session id (same as projectId)
+ */
+  getPIAProgress: async (
+    sessionId: string
+  ): Promise<PiaProgressResponse> => {
+    const response = await fetch(
+      `${PIA_API_BASE_URL}/progress?session_id=${sessionId}`,
+      {
+        method: "GET",
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.detail ||
+        `Failed to fetch PIA progress: ${response.statusText}`
+      );
+    }
+
+    return response.json();
+  },
+
 };
+
+
+

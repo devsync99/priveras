@@ -33,7 +33,6 @@ export interface PiaDocument {
 
 export interface ModifyPiaPayload {
   pia_name: string;
-  section: string;
   previous_response: string;
   modification_query: string;
   projectId: string;
@@ -43,6 +42,14 @@ export interface ModifyPiaResponse {
   response: string;
   messageId: string;
 }
+
+export interface PiaProgressResponse {
+  session_id: string;
+  status_list: string[];
+  total_steps: number;
+  message: string;
+}
+
 
 class PIAChatAPI {
   private baseUrl = "/api/pia/chat";
@@ -149,6 +156,24 @@ class PIAChatAPI {
       createdAt: new Date(updatedMessage.createdAt),
     };
   }
+
+
+
+  async getProgress(sessionId: string): Promise<PiaProgressResponse> {
+    const response = await fetch(
+      `${this.baseUrl}/progress?session_id=${sessionId}`
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to fetch PIA progress");
+    }
+
+    return response.json();
+  }
 }
+
+
+
 
 export const piaChatApi = new PIAChatAPI();

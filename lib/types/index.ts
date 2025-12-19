@@ -69,7 +69,13 @@ export interface PIAGenerateResponse {
 export interface GeneratePIARequest {
   pia_name: string;
   query: string;
+  session_id: string;
+  history: {
+    role: string;
+    content: string;
+  }[];
 }
+
 
 export interface ModifyPIARequest {
   pia_name: string;
@@ -88,4 +94,12 @@ export interface ChatResponse {
   answer: string;
   chunks_used: ChunkInfo[];
   num_chunks: number;
+}
+
+
+export interface PiaProgressResponse {
+  session_id: string;
+  status_list: string[];
+  total_steps: number;
+  message: string;
 }

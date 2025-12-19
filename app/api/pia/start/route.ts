@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
 
     // Use project ID as the PIA name
     externalFormData.append("pia_name", projectId);
+    externalFormData.append("session_id", projectId);
+
 
     // Forward request to external PIA API
     const response = await fetch(`${PIA_API_BASE_URL}/pia/start`, {
