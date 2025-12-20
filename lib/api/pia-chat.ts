@@ -50,9 +50,34 @@ export interface PiaProgressResponse {
   message: string;
 }
 
+export interface GetDocumentByCitationResponse {
+  url: string;
+  name: string;
+}
+
 
 class PIAChatAPI {
   private baseUrl = "/api/pia/chat";
+
+  /* -------------------- Get URL through citation -------------------- */
+
+   async getDocumentByCitation(
+    projectId: string,
+    citation: string
+  ): Promise<GetDocumentByCitationResponse> {
+    const response = await fetch(
+      `${this.baseUrl}/doc-citation?projectId=${projectId}&citation=${encodeURIComponent(
+        citation
+      )}`
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to fetch document for citation");
+    }
+
+    return response.json();
+  }
 
   /* -------------------- Documents -------------------- */
 

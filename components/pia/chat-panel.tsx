@@ -1,9 +1,13 @@
 // components/pia/chat-panel.tsx
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+
+
 
 import {
   Send,
@@ -392,10 +396,79 @@ Click "Execute PIA" below to process ${pronoun} and begin generating your Privac
       fileInputRef.current.value = "";
     }
   };
+  const handleRemoveAttachment = (messageId: string, fileIndex: number) => {
+    setMessages((prev) => {
+      // First, find the user message
+      const userMsg = prev.find((m) => m.id === messageId);
 
-  const removeFile = (index: number) => {
-    setAttachedFiles(attachedFiles.filter((_, i) => i !== index));
+      if (!userMsg) return prev;
+
+      // Compute updated attachments after removal
+      const updatedUserAttachments =
+        userMsg.attachments?.filter((_, i) => i !== fileIndex) || [];
+
+      // Determine if we should remove user message
+      const shouldRemoveUserMsg = updatedUserAttachments.length === 0;
+
+      return prev
+        .map((msg) => {
+          // Update user message
+          if (msg.id === messageId) {
+            if (shouldRemoveUserMsg) return null;
+
+            return {
+              ...msg,
+              attachments: updatedUserAttachments,
+              content: `Uploaded ${updatedUserAttachments.length} document${updatedUserAttachments.length > 1 ? "s" : ""
+                }`,
+            };
+          }
+
+          // Update assistant message linked to this user message
+          if (msg.type === "assistant" && msg.actions?.some(a => a.value === "execute-pia")) {
+            if (updatedUserAttachments.length === 0) return null;
+
+            const remainingCount = updatedUserAttachments.length;
+            const isMultiple = remainingCount > 1;
+            const documentLabel = isMultiple ? "documents" : "document";
+            const documentRef = isMultiple ? "these documents" : "this document";
+            const pronoun = isMultiple ? "them" : "it";
+
+            const isInProgress = projectStatus === "In Progress";
+            const actionLabel = isInProgress
+              ? `Execute indexing of ${documentRef}`
+              : "Execute PIA Section Generation";
+
+            const assistantMessage = isInProgress
+              ? `I've added your ${remainingCount} ${documentLabel} to the existing project context.
+${isMultiple ? "These documents have" : "This document has"} been indexed and will be used alongside your previously uploaded materials.
+Click "Execute indexing of ${documentRef}" to index ${pronoun} and continue working on your current PIA.`
+              : `Perfect! I've received your ${remainingCount} ${documentLabel}.
+Click "Execute PIA" below to process ${pronoun} and begin generating your Privacy Impact Assessment sections.`;
+
+            return {
+              ...msg,
+              content: assistantMessage,
+              actions: [
+                {
+                  label: actionLabel,
+                  value: "execute-pia",
+                },
+              ],
+            };
+          }
+
+          return msg;
+        })
+        .filter(Boolean) as Message[];
+    });
+
+    // Update attachedFiles state
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== fileIndex));
   };
+
+
+
 
   const handleAcceptDraft = async (message: Message) => {
     try {
@@ -673,20 +746,6 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
 
 
-
-  const getUploadedFilesContext = (): string => {
-    const filesFromMessages = messages
-      .filter((msg) => msg.attachments && msg.attachments.length > 0)
-      .flatMap((msg) => msg.attachments || [])
-      .map((file) => file.name);
-
-    if (filesFromMessages.length > 0) {
-      const uniqueFiles = Array.from(new Set(filesFromMessages));
-      return `Documents uploaded: ${uniqueFiles.join(", ")}. `;
-    }
-    return "";
-  };
-
   const handleSectionClick = async (
     sectionLabel: string,
     sectionValue: string
@@ -707,12 +766,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
         throw new Error("Prompt not found for this section");
       }
 
-      const filesContext = getUploadedFilesContext();
-      const fullPrompt = filesContext
-        ? `${filesContext}\n\n${promptFromFile}`
-        : promptFromFile;
-
-      setInputValue(fullPrompt);
+      setInputValue(promptFromFile);
 
       setSelectedSectionInfo({
         label: sectionLabel,
@@ -758,57 +812,100 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     setInputValue(e.target.value);
   };
 
+  const TextWithCitations = ({
+    children,
+    projectId,
+  }: {
+    children: React.ReactNode;
+    projectId: string;
+  }) => {
+    if (!children) return null;
+
+    // Handler for when a citation is clicked
+    const handleCitationClick = async (citation: string) => {
+      try {
+        const res = await piaChatApi.getDocumentByCitation(projectId, citation);
+        window.open(res.url, "_blank"); // open the file in a new tab
+      } catch (err: any) {
+        console.error(err);
+        toast.error("Failed to open document", {
+          description: err?.message || "Could not open the document",
+        });
+      }
+    };
+
+    return React.Children.map(children, (child) => {
+      if (typeof child === "string") {
+        // Regex to match citations like [Source 14, Page 1] or [1] or [Smith et al.]
+        const parts = child.split(/(\[[^\]]+\])/g);
+
+        return parts.map((part, idx) => {
+          if (/^\[[^\]]+\]$/.test(part)) {
+            return (
+              <span
+                key={idx}
+                className="text-blue-800 dark:text-blue-400 hover:underline cursor-pointer font-medium transition-colors hover:text-blue-900 dark:hover:text-blue-300"
+                onClick={() => handleCitationClick(part)}
+              >
+                {part}
+              </span>
+            );
+          }
+          return <span key={idx}>{part}</span>;
+        });
+      }
+      return child;
+    });
+  };
+
+  // Markdown components with TypeScript types
   const markdownComponents: Components = {
     h1: ({ children }) => (
       <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3 border-b dark:border-gray-700 pb-1">
-        {children}
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
       </h1>
     ),
-
     h2: ({ children }) => (
       <h2 className="text-base font-semibold text-indigo-700 dark:text-indigo-400 mb-2">
-        {children}
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
       </h2>
     ),
-
     h3: ({ children }) => (
       <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2 uppercase tracking-wide">
-        {children}
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
       </h3>
     ),
-
     p: ({ children }) => (
       <p className="mb-2 last:mb-0 leading-relaxed text-gray-800 dark:text-gray-200">
-        {children}
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
       </p>
     ),
-
     ul: ({ children }) => (
       <ul className="list-disc ml-5 mb-2 space-y-1">{children}</ul>
     ),
-
     ol: ({ children }) => (
       <ol className="list-decimal ml-5 mb-2 space-y-1">{children}</ol>
     ),
-
-    li: ({ children }) => <li className="text-sm">{children}</li>,
-
+    li: ({ children }) => (
+      <li className="text-sm">
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+      </li>
+    ),
     blockquote: ({ children }) => (
       <blockquote className="border-l-4 border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-4 py-2 rounded-r-md text-sm italic my-3">
-        {children}
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
       </blockquote>
     ),
-
     strong: ({ children }) => (
       <strong className="font-semibold text-gray-900 dark:text-gray-100">
-        {children}
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
       </strong>
     ),
-
     em: ({ children }) => (
-      <em className="italic text-gray-700 dark:text-gray-300">{children}</em>
+      <em className="italic text-gray-700 dark:text-gray-300">
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+      </em>
     ),
-
     code: ({ children, className }) => {
       const inline = !className?.includes("language-");
       return inline ? (
@@ -821,8 +918,24 @@ The modifications have been successfully saved. I am ready for the next step. Pl
         </pre>
       );
     },
+    table: ({ children }) => (
+      <table className="table-auto border border-gray-300 dark:border-gray-700 mb-3">
+        {children}
+      </table>
+    ),
+    th: ({ children }) => (
+      <th className="border border-gray-300 dark:border-gray-700 px-3 py-1 bg-gray-100 dark:bg-gray-800 text-left text-sm">
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm">
+        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+      </td>
+    ),
   };
 
+  console.log(messages, "the mesgs")
   return (
     <div
       className={`${isFullWidth ? "flex-1" : "w-full lg:w-1/2"
@@ -946,58 +1059,77 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                           {message.attachments.map((file, idx) => (
                             <div
                               key={idx}
-                              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+                              className="group relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm
+           
+          "
                             >
+
+                              {/* Remove Button (Lucide X, appears on hover) */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveAttachment(message.id, idx);
+                                }}
+                                className="
+    
+      p-0.5 rounded-full
+      opacity-0 group-hover:opacity-100
+      transition-opacity
+      text-gray-400 hover:text-black
+      hover:bg-red-50 dark:hover:bg-gray-600
+    "
+                                aria-label="Remove file"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                              {/* File Icon */}
                               <span className="text-xl">
                                 {getFileIcon(file.name)}
                               </span>
+
+                              {/* File Name */}
                               <span className="truncate flex-1">
                                 {file.name}
                               </span>
+
+
                             </div>
+
                           ))}
                         </div>
                       </div>
                     )}
 
                     {message.content.includes("---SECTION_BREAK---") ? (
-                      <div className="text-sm leading-relaxed">
-                        {(() => {
-                          const [header, content] = message.content.split(
-                            "---SECTION_BREAK---"
-                          );
+                      (() => {
+                        const [header, content] = message.content.split("---SECTION_BREAK---");
+                        return (
+                          <>
+                            {/* Section Header */}
+                            <div className="mb-4 prose prose-sm max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                {header}
+                              </ReactMarkdown>
+                            </div>
 
-                          return (
-                            <>
-                              {/* Section Header */}
-                              <div className="mb-4 prose prose-sm max-w-none">
-                                <ReactMarkdown components={markdownComponents}>
-                                  {header}
-                                </ReactMarkdown>
-                              </div>
-
-                              {/* Section Body (HTML generated by backend) */}
-                              <div
-                                className="formatted-section prose prose-sm max-w-none"
-                                dangerouslySetInnerHTML={{ __html: content }}
-                              />
-                            </>
-                          );
-                        })()}
-                      </div>
+                            {/* Section Body */}
+                            <div className="formatted-section prose prose-sm max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                {content}
+                              </ReactMarkdown>
+                            </div>
+                          </>
+                        );
+                      })()
                     ) : (
                       <div
-                        className={`text-sm leading-relaxed ${message.type === "user"
-                          ? ""
-                          : "prose prose-sm max-w-none"
+                        className={`text-sm leading-relaxed ${message.type === "user" ? "" : "prose prose-sm max-w-none"
                           }`}
                       >
                         <ReactMarkdown
-                          components={
-                            message.type === "user"
-                              ? undefined
-                              : markdownComponents
-                          }
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeRaw]}
+                          components={message.type === "user" ? undefined : markdownComponents}
                         >
                           {message.content}
                         </ReactMarkdown>
