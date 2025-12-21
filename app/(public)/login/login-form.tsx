@@ -37,25 +37,25 @@ export function LoginForm({ handleLogin }: LoginFormProps) {
 
   return (
     <div className="w-full max-w-md">
-      <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+      <div className=" overflow-hidden">
         {/* Header */}
-        <div className="bg-linear-to-r from-indigo-600 to-purple-600 px-8 py-10">
+        <div className="px-8 py-5">
           <div className="flex items-center justify-center w-full h-16 mb-4 mx-auto relative">
-            <Image src="/logos/logoWhite.svg" alt="Logo" fill />
+            <Image src="/logos/logo.svg" alt="Logo" fill />
           </div>
-          <h2 className="text-3xl font-bold text-white text-center">
+          <h2 className="text-[22px] font-bold text-center">
             Welcome Back
           </h2>
           <div className="flex items-center justify-center gap-2 mt-2">
-            <p className="text-indigo-100 text-center mt-2 text-sm">
+            <p className="text-[14px] text-indigo-700 text-center mt-2 text-sm">
               Sign in to continue to your account{" "}
             </p>
           </div>
         </div>
 
         {/* Form */}
-        <div className="px-8 py-10">
-          <form onSubmit={onSubmit} className="space-y-6">
+        <div className="px-8 py-2">
+          <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <label
                 htmlFor="email"

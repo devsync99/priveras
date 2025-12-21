@@ -113,7 +113,7 @@ export default async function LoginPage() {
       </div>
 
       {/* Right Side - Login Form */}
-      <div className="flex-1 flex items-center justify-center bg-linear-to-br from-indigo-50 via-white to-purple-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="flex-1 flex items-center justify-center py-8 px-4 sm:px-6 lg:px-8">
         <LoginForm handleLogin={handleLogin} />
       </div>
     </div>

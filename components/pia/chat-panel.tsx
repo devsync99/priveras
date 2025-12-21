@@ -935,7 +935,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     ),
   };
 
-  console.log(messages, "the mesgs")
+  // console.log(messages, "the mesgs")
   return (
     <div
       className={`${isFullWidth ? "flex-1" : "w-full lg:w-1/2"
