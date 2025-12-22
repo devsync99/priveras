@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Modal } from "../ui/modal";
 import { toast } from "sonner";
 import { piaChatApi } from "@/lib/api/pia-chat";
+import MarkdownMessage from "@/lib/pia/markdown-comps";
 
 interface ModifyAnswerPanelProps {
   isOpen: boolean;
@@ -22,10 +23,23 @@ function ModifyAnswerPanel({
   const [isTouched, setIsTouched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Ref for scrollable content
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (isOpen) {
       setModifiedText("");
       setIsTouched(false);
+
+      // Smooth scroll to bottom after modal opens
+      requestAnimationFrame(() => {
+        if (contentRef.current) {
+          contentRef.current.scrollTo({
+            top: contentRef.current.scrollHeight,
+            behavior: "smooth",
+          });
+        }
+      });
     }
   }, [isOpen]);
 
@@ -50,9 +64,7 @@ function ModifyAnswerPanel({
         description: "The PIA response has been modified and saved.",
       });
 
-      // Push updated response to parent
       onModified?.(response);
-
       onClose();
     } catch (error) {
       toast.error("Modification failed", {
@@ -70,7 +82,11 @@ function ModifyAnswerPanel({
       title="Modify Response Request"
       size="lg"
     >
-      <div className="space-y-6">
+      {/* Scrollable Container */}
+      <div
+        ref={contentRef}
+        className="space-y-6 max-h-[70vh] overflow-y-auto"
+      >
         {/* Previous Response */}
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
           <div className="border-b border-gray-200 dark:border-gray-700 px-4 py-2">
@@ -79,7 +95,12 @@ function ModifyAnswerPanel({
             </h3>
           </div>
           <div className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-            {previousResponse}
+            {piaName && (
+              <MarkdownMessage
+                projectId={piaName}
+                content={previousResponse}
+              />
+            )}
           </div>
         </div>
 

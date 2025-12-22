@@ -6,9 +6,6 @@ import { Document, Packer, Paragraph, TextRun } from "docx";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-
-
-
 import {
   Send,
   Upload,
@@ -569,13 +566,28 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     try {
       // Remove markdown formatting for clean copy
       const cleanContent = content
-        .replace(/\*\*(.*?)\*\*/g, "$1") // Remove bold
-        .replace(/\*(.*?)\*/g, "$1") // Remove italic
-        .replace(/`(.*?)`/g, "$1") // Remove code formatting
-        .replace(/#{1,6}\s/g, "") // Remove headers
+        .replace(/\*\*(.*?)\*\*/g, "$1") // Bold
+        .replace(/\*(.*?)\*/g, "$1") // Italic
+        .replace(/`(.*?)`/g, "$1") // Code
+        .replace(/#{1,6}\s/g, "") // Headers
         .trim();
 
-      await navigator.clipboard.writeText(cleanContent);
+      // Clipboard API works on secure context (HTTPS or localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(cleanContent);
+      } else {
+        // Fallback for insecure context (HTTP)
+        const textarea = document.createElement("textarea");
+        textarea.value = cleanContent;
+        textarea.style.position = "fixed"; // Avoid scrolling
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
       toast.success("Copied to clipboard", {
         description: "Clean text has been copied to your clipboard",
       });
@@ -583,8 +595,10 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       toast.error("Failed to copy", {
         description: "Could not copy to clipboard",
       });
+      console.error("Copy failed:", error);
     }
   };
+
 
   const handleModifyAnswer = (message: Message) => {
     setIsModifyPanelOpen(true);
@@ -1036,7 +1050,8 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                 <div
                   className={`flex flex-col ${message.content.includes("---SECTION_BREAK---")
                     ? "w-full max-w-full"
-                    : "max-w-[85%] sm:max-w-xl lg:max-w-2xl"
+                    : `max-w-[85%] sm:max-w-xl lg:max-w-2xl ${message.isSectionSteps ? "xl:max-w-4xl" : "xl:max-w-2xl"}`
+
                     } ${message.type === "user" ? "items-end" : "items-start"}`}
                 >
                   <div
@@ -1239,7 +1254,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                     !(
                       message.attachments && message.attachments.length > 0
                     ) && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2 gap-2 px-2 py-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-2 px-2 py-3">
                         {piaSections.map((section, idx) => {
                           const isSelected =
                             selectedSectionInfo?.value === section.value;
