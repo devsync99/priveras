@@ -1,209 +1,150 @@
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+
 export type TextSegment = {
   text: string;
   bold?: boolean;
   italic?: boolean;
   code?: boolean;
-  color?: string;
+  link?: string;
 };
 
 export type DocxBlock =
-  | { type: "heading"; segments: TextSegment[]; level: 1 | 2 | 3 }
+  | { type: "heading"; level: number; segments: TextSegment[] }
   | { type: "paragraph"; segments: TextSegment[] }
-  | { type: "bullet"; items: TextSegment[][] }
-  | { type: "numbered"; items: TextSegment[][] }
+  | { type: "list"; ordered: boolean; items: TextSegment[][] }
+  | { type: "table"; headers: string[]; rows: string[][] }
+  | { type: "code-block"; text: string; language?: string }
   | { type: "blockquote"; segments: TextSegment[] }
-  | { type: "code-block"; text: string }
   | { type: "divider" };
 
 /**
- * Parse inline markdown formatting (bold, italic, code)
+ * Extract text segments with formatting from node children
  */
-function parseInlineMarkdown(text: string): TextSegment[] {
+function extractSegments(children: any[]): TextSegment[] {
   const segments: TextSegment[] = [];
-  let remaining = text;
 
-  // Remove HTML tags first
-  remaining = remaining.replace(/<[^>]+>/g, "");
-
-  const patterns = [
-    { regex: /\*\*\*(.+?)\*\*\*/g, bold: true, italic: true }, // ***text***
-    { regex: /\*\*(.+?)\*\*/g, bold: true }, // **text**
-    { regex: /__(.+?)__/g, bold: true }, // __text__
-    { regex: /\*(.+?)\*/g, italic: true }, // *text*
-    { regex: /_(.+?)_/g, italic: true }, // _text_
-    { regex: /`(.+?)`/g, code: true }, // `text`
-  ];
-
-  let lastIndex = 0;
-  const matches: Array<{
-    index: number;
-    length: number;
-    segment: TextSegment;
-  }> = [];
-
-  // Find all matches
-  patterns.forEach((pattern) => {
-    const regex = new RegExp(pattern.regex.source, "g");
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      matches.push({
-        index: match.index,
-        length: match[0].length,
-        segment: {
-          text: match[1],
-          bold: pattern.bold,
-          italic: pattern.italic,
-          code: pattern.code,
-        },
-      });
+  children.forEach((child: any) => {
+    if (child.type === "text") {
+      segments.push({ text: child.value });
+    } else if (child.type === "strong") {
+      const text = child.children.map((c: any) => c.value).join("");
+      segments.push({ text, bold: true });
+    } else if (child.type === "emphasis") {
+      const text = child.children.map((c: any) => c.value).join("");
+      segments.push({ text, italic: true });
+    } else if (child.type === "inlineCode") {
+      segments.push({ text: child.value, code: true });
+    } else if (child.type === "link") {
+      const text = child.children.map((c: any) => c.value).join("");
+      segments.push({ text, link: child.url });
+    } else if (child.children) {
+      // Recursively handle nested formatting (e.g., bold + italic)
+      segments.push(...extractSegments(child.children));
     }
   });
-
-  // Sort by index
-  matches.sort((a, b) => a.index - b.index);
-
-  // Remove overlapping matches (keep the first one)
-  const validMatches = matches.filter((match, i) => {
-    if (i === 0) return true;
-    const prev = matches[i - 1];
-    return match.index >= prev.index + prev.length;
-  });
-
-  // Build segments
-  validMatches.forEach((match) => {
-    // Add plain text before this match
-    if (match.index > lastIndex) {
-      const plainText = text.slice(lastIndex, match.index);
-      if (plainText) {
-        segments.push({ text: plainText });
-      }
-    }
-    // Add formatted text
-    segments.push(match.segment);
-    lastIndex = match.index + match.length;
-  });
-
-  // Add remaining plain text
-  if (lastIndex < text.length) {
-    const plainText = text.slice(lastIndex);
-    if (plainText) {
-      segments.push({ text: plainText });
-    }
-  }
-
-  // If no matches found, return the whole text as a single segment
-  if (segments.length === 0 && text) {
-    segments.push({ text });
-  }
 
   return segments;
 }
 
-export function parseContent(content: string): DocxBlock[] {
-  const lines = content.split("\n");
+/**
+ * Parse markdown content into structured blocks
+ */
+export function parseContent(markdown: string): DocxBlock[] {
+  const tree = unified().use(remarkParse).use(remarkGfm).parse(markdown);
+
   const blocks: DocxBlock[] = [];
 
-  let listBuffer: TextSegment[][] = [];
-  let listType: "bullet" | "numbered" | null = null;
-  let codeBlockBuffer: string[] = [];
-  let inCodeBlock = false;
-
-  const flushList = () => {
-    if (listType && listBuffer.length) {
-      blocks.push({ type: listType, items: [...listBuffer] });
-      listBuffer = [];
-      listType = null;
-    }
-  };
-
-  const flushCodeBlock = () => {
-    if (codeBlockBuffer.length) {
-      blocks.push({ type: "code-block", text: codeBlockBuffer.join("\n") });
-      codeBlockBuffer = [];
-    }
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Handle code blocks
-    if (trimmed.startsWith("```")) {
-      if (inCodeBlock) {
-        flushCodeBlock();
-        inCodeBlock = false;
-      } else {
-        flushList();
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeBlockBuffer.push(line);
-      continue;
-    }
-
-    // Skip empty lines
-    if (!trimmed) continue;
-
-    // Horizontal rule
-    if (/^[-*_]{3,}$/.test(trimmed)) {
-      flushList();
-      blocks.push({ type: "divider" });
-      continue;
-    }
-
-    // Headings
-    if (/^#{1,3}\s/.test(trimmed)) {
-      flushList();
-      const level = trimmed.match(/^#+/)![0].length as 1 | 2 | 3;
-      const text = trimmed.replace(/^#+\s*/, "");
+  tree.children.forEach((node: any) => {
+    // Headings (h1, h2, h3, etc.)
+    if (node.type === "heading") {
       blocks.push({
         type: "heading",
-        level,
-        segments: parseInlineMarkdown(text),
+        level: node.depth,
+        segments: extractSegments(node.children),
       });
-      continue;
     }
 
-    // Blockquote
-    if (trimmed.startsWith(">")) {
-      flushList();
-      const text = trimmed.replace(/^>\s*/, "");
+    // Paragraphs
+    else if (node.type === "paragraph") {
+      blocks.push({
+        type: "paragraph",
+        segments: extractSegments(node.children),
+      });
+    }
+
+    // Lists (bullet and numbered)
+    else if (node.type === "list") {
+      const items: TextSegment[][] = [];
+      
+      node.children.forEach((listItem: any) => {
+        // Each list item can have multiple paragraphs
+        const itemSegments: TextSegment[] = [];
+        listItem.children.forEach((child: any) => {
+          if (child.type === "paragraph") {
+            itemSegments.push(...extractSegments(child.children));
+          }
+        });
+        items.push(itemSegments);
+      });
+
+      blocks.push({
+        type: "list",
+        ordered: node.ordered,
+        items,
+      });
+    }
+
+    // Tables
+    else if (node.type === "table") {
+      const headers = node.children[0].children.map((cell: any) =>
+        cell.children.map((c: any) => c.value || "").join("")
+      );
+
+      const rows = node.children.slice(1).map((row: any) =>
+        row.children.map((cell: any) =>
+          cell.children.map((c: any) => c.value || "").join("")
+        )
+      );
+
+      blocks.push({
+        type: "table",
+        headers,
+        rows,
+      });
+    }
+
+    // Code blocks
+    else if (node.type === "code") {
+      blocks.push({
+        type: "code-block",
+        text: node.value,
+        language: node.lang,
+      });
+    }
+
+    // Blockquotes
+    else if (node.type === "blockquote") {
+      const segments: TextSegment[] = [];
+      node.children.forEach((child: any) => {
+        if (child.type === "paragraph") {
+          segments.push(...extractSegments(child.children));
+        }
+      });
       blocks.push({
         type: "blockquote",
-        segments: parseInlineMarkdown(text),
+        segments,
       });
-      continue;
     }
 
-    // Bullet list
-    if (/^[-*]\s+/.test(trimmed)) {
-      if (listType !== "bullet") flushList();
-      listType = "bullet";
-      const text = trimmed.replace(/^[-*]\s+/, "");
-      listBuffer.push(parseInlineMarkdown(text));
-      continue;
+    // Horizontal rules
+    else if (node.type === "thematicBreak") {
+      blocks.push({
+        type: "divider",
+      });
     }
+  });
 
-    // Numbered list
-    if (/^\d+\.\s+/.test(trimmed)) {
-      if (listType !== "numbered") flushList();
-      listType = "numbered";
-      const text = trimmed.replace(/^\d+\.\s+/, "");
-      listBuffer.push(parseInlineMarkdown(text));
-      continue;
-    }
-
-    // Regular paragraph
-    flushList();
-    blocks.push({
-      type: "paragraph",
-      segments: parseInlineMarkdown(trimmed),
-    });
-  }
-
-  flushList();
-  flushCodeBlock();
   return blocks;
 }

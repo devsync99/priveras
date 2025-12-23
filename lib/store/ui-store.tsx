@@ -15,6 +15,9 @@ interface UIStore {
   isSidebarOpen: boolean;
   setIsSidebarOpen: (isOpen: boolean) => void;
   toggleSidebar: () => void;
+
+  documentRefreshKey: number;
+  triggerDocumentRefresh: () => void;
 }
 
 export const useUIStore = create<UIStore>()(
@@ -33,7 +36,14 @@ export const useUIStore = create<UIStore>()(
       setIsSidebarOpen: (isOpen) => set({ isSidebarOpen: isOpen }),
       toggleSidebar: () =>
         set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+
+      documentRefreshKey: 0,
+      triggerDocumentRefresh: () =>
+        set((state) => ({
+          documentRefreshKey: state.documentRefreshKey + 1,
+        })),
     }),
+
     {
       name: "ui-store",
       skipHydration: true,

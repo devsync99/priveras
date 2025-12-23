@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Document, Packer, Paragraph, TextRun } from "docx";
+// import { Document, Packer, Paragraph, TextRun } from "docx";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -125,6 +125,10 @@ export function ChatPanel({
     label: string;
     value: string;
   } | null>(null);
+
+  const triggerDocumentRefresh = useUIStore(
+    (state) => state.triggerDocumentRefresh
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [piaOpen, setPiaOpen] = useState(true); // default open
@@ -494,6 +498,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       });
 
       await loadChatHistory();
+      triggerDocumentRefresh();
 
       toast.success("Draft accepted", {
         description: "The response has been accepted and saved",
@@ -506,61 +511,61 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     }
   };
 
-  const downloadDocx = async (isDraft = false) => {
-    if (acceptedMessages.length === 0) {
-      toast.error("No accepted drafts", {
-        description: "Please accept at least one draft before exporting",
-      });
-      return;
-    }
+  // const downloadDocx = async (isDraft = false) => {
+  //   if (acceptedMessages.length === 0) {
+  //     toast.error("No accepted drafts", {
+  //       description: "Please accept at least one draft before exporting",
+  //     });
+  //     return;
+  //   }
 
-    try {
-      // Build content directly from accepted message content
-      const contentBlocks = acceptedMessages.flatMap((msg) =>
-        buildDocxBlocks(parseContent(msg))
-      );
+  //   try {
+  //     // Build content directly from accepted message content
+  //     const contentBlocks = acceptedMessages.flatMap((msg) =>
+  //       buildDocxBlocks(parseContent(msg))
+  //     );
 
-      const doc = new Document({
-        sections: [
-          {
-            // Only add footer for professional version
-            footers: isDraft
-              ? undefined
-              : { default: buildFooter("PIA Project") },
-            children: isDraft
-              ? contentBlocks // Draft: just the messages
-              : [
-                ...buildCoverPage("PIA Project", "Organization Name"), // Professional: cover page
-                ...contentBlocks, // Actual accepted message content
-                // Optional: page break if needed
-                new Paragraph({ pageBreakBefore: true }),
-              ],
-          },
-        ],
-      });
+  //     const doc = new Document({
+  //       sections: [
+  //         {
+  //           // Only add footer for professional version
+  //           footers: isDraft
+  //             ? undefined
+  //             : { default: buildFooter("PIA Project") },
+  //           children: isDraft
+  //             ? contentBlocks // Draft: just the messages
+  //             : [
+  //               ...buildCoverPage("PIA Project", "Organization Name"), // Professional: cover page
+  //               ...contentBlocks, // Actual accepted message content
+  //               // Optional: page break if needed
+  //               new Paragraph({ pageBreakBefore: true }),
+  //             ],
+  //         },
+  //       ],
+  //     });
 
-      const blob = await Packer.toBlob(doc);
-      const url = URL.createObjectURL(blob);
+  //     const blob = await Packer.toBlob(doc);
+  //     const url = URL.createObjectURL(blob);
 
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = isDraft ? "PIA-Draft-Export.docx" : "PIA-Professional.docx";
-      a.click();
+  //     const a = document.createElement("a");
+  //     a.href = url;
+  //     a.download = isDraft ? "PIA-Draft-Export.docx" : "PIA-Professional.docx";
+  //     a.click();
 
-      URL.revokeObjectURL(url);
+  //     URL.revokeObjectURL(url);
 
-      toast.success("Document exported", {
-        description: `Successfully exported ${acceptedMessages.length
-          } accepted draft${acceptedMessages.length > 1 ? "s" : ""}`,
-      });
-    } catch (error) {
-      console.error("Error exporting document:", error);
-      toast.error("Export failed", {
-        description:
-          error instanceof Error ? error.message : "Unknown error occurred",
-      });
-    }
-  };
+  //     toast.success("Document exported", {
+  //       description: `Successfully exported ${acceptedMessages.length
+  //         } accepted draft${acceptedMessages.length > 1 ? "s" : ""}`,
+  //     });
+  //   } catch (error) {
+  //     console.error("Error exporting document:", error);
+  //     toast.error("Export failed", {
+  //       description:
+  //         error instanceof Error ? error.message : "Unknown error occurred",
+  //     });
+  //   }
+  // };
 
   const handleCopyToClipboard = async (content: string) => {
     try {
@@ -972,14 +977,14 @@ The modifications have been successfully saved. I am ready for the next step. Pl
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            {/* <button
               onClick={() => downloadDocx()}
               className="px-3 lg:px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-2 text-xs lg:text-sm font-medium shadow-sm"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Export Doc</span>
               <span className="sm:hidden">Export</span>
-            </button>
+            </button> */}
             <button
               disabled={projectStatus === "Completed"}
               onClick={() => setIsViewDocsModalOpen(true)}
