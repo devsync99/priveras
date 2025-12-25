@@ -117,7 +117,7 @@ export function DocumentPanel({
               className="px-3 lg:px-4 py-2 bg-linear-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center gap-2 text-xs lg:text-sm font-medium shadow-sm"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Export</span>
+              <span className="hidden sm:inline">Export PIA</span>
             </button>
           </div>
         </div>

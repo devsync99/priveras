@@ -14,7 +14,7 @@ export type DocxBlock =
   | { type: "heading"; level: number; segments: TextSegment[] }
   | { type: "paragraph"; segments: TextSegment[] }
   | { type: "list"; ordered: boolean; items: TextSegment[][] }
-  | { type: "table"; headers: string[]; rows: string[][] }
+  | { type: "table"; headers: TextSegment[][]; rows: TextSegment[][][] }
   | { type: "code-block"; text: string; language?: string }
   | { type: "blockquote"; segments: TextSegment[] }
   | { type: "divider" };
@@ -96,15 +96,25 @@ export function parseContent(markdown: string): DocxBlock[] {
       });
     }
 
-    // Tables
+    // Tables - FIXED VERSION
     else if (node.type === "table") {
-      const headers = node.children[0].children.map((cell: any) =>
-        cell.children.map((c: any) => c.value || "").join("")
+      // In remark-gfm, all table rows are in node.children
+      // The first row is the header, rest are data rows
+      
+      if (node.children.length === 0) {
+        return; // Skip empty tables
+      }
+
+      // Extract headers with formatting (first row)
+      const headerRow = node.children[0];
+      const headers = headerRow.children.map((cell: any) =>
+        extractSegments(cell.children)
       );
 
+      // Extract data rows with formatting (remaining rows)
       const rows = node.children.slice(1).map((row: any) =>
         row.children.map((cell: any) =>
-          cell.children.map((c: any) => c.value || "").join("")
+          extractSegments(cell.children)
         )
       );
 

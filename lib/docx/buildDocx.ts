@@ -13,37 +13,41 @@ import {
 import { DocxBlock, TextSegment } from "./parseContent";
 
 /**
- * Convert text segments to TextRun objects with proper formatting
+ * Convert text segments to TextRun objects
  */
-function segmentsToTextRuns(segments: TextSegment[]): TextRun[] {
-  return segments.map((seg) => {
-    return new TextRun({
-      text: seg.text,
-      font: seg.code ? "Courier New" : "Calibri",
-      size: seg.code ? 20 : 22,
-      bold: seg.bold,
-      italics: seg.italic,
-      color: seg.code ? "2563EB" : undefined,
-      shading: seg.code
-        ? {
-            fill: "F3F4F6",
-            type: ShadingType.SOLID,
-          }
-        : undefined,
-    });
-  });
+function segmentsToTextRuns(
+  segments: TextSegment[],
+  forceBold = false
+): TextRun[] {
+  return segments.map(
+    (seg) =>
+      new TextRun({
+        text: seg.text,
+        bold: forceBold || seg.bold,
+        italics: seg.italic,
+        font: seg.code ? "Courier New" : "Calibri",
+        size: seg.code ? 20 : 22,
+        color: seg.code ? "2563EB" : undefined,
+        shading: seg.code
+          ? {
+              fill: "F3F4F6",
+              type: ShadingType.SOLID,
+            }
+          : undefined,
+      })
+  );
 }
 
 /**
- * Build DOCX elements from parsed content blocks
+ * Build DOCX elements from parsed blocks
  */
-export function buildDocxBlocks(blocks: DocxBlock[]): any[] {
-  const children: any[] = [];
+export function buildDocxBlocks(blocks: DocxBlock[]): (Paragraph | Table)[] {
+  const children: (Paragraph | Table)[] = [];
 
-  blocks.forEach((block) => {
-    // Headings with proper formatting
+  for (const block of blocks) {
+    /* ---------------- HEADINGS ---------------- */
     if (block.type === "heading") {
-      const headingLevels: Record<number, typeof HeadingLevel[keyof typeof HeadingLevel]> = {
+      const headingMap: Record<number, typeof HeadingLevel[keyof typeof HeadingLevel]> = {
         1: HeadingLevel.HEADING_1,
         2: HeadingLevel.HEADING_2,
         3: HeadingLevel.HEADING_3,
@@ -54,49 +58,40 @@ export function buildDocxBlocks(blocks: DocxBlock[]): any[] {
 
       children.push(
         new Paragraph({
+          heading: headingMap[block.level] || HeadingLevel.HEADING_2,
           children: segmentsToTextRuns(block.segments),
-          heading: headingLevels[block.level] || HeadingLevel.HEADING_2,
-          spacing: {
-            before: 240,
-            after: 120,
-          },
+          spacing: { before: 240, after: 120 },
         })
       );
     }
 
-    // Paragraphs with inline formatting
+    /* ---------------- PARAGRAPH ---------------- */
     else if (block.type === "paragraph") {
       children.push(
         new Paragraph({
           children: segmentsToTextRuns(block.segments),
-          spacing: {
-            after: 120,
-          },
+          spacing: { after: 120 },
         })
       );
     }
 
-    // Lists (bullet and numbered)
+    /* ---------------- LIST ---------------- */
     else if (block.type === "list") {
-      block.items.forEach((itemSegments, index) => {
+      for (const itemSegments of block.items) {
         children.push(
           new Paragraph({
             children: segmentsToTextRuns(itemSegments),
-            bullet: block.ordered
-              ? { level: 0 }
-              : { level: 0 },
+            bullet: block.ordered ? undefined : { level: 0 },
             numbering: block.ordered
               ? { reference: "default-numbering", level: 0 }
               : undefined,
-            spacing: {
-              after: 80,
-            },
+            spacing: { after: 80 },
           })
         );
-      });
+      }
     }
 
-    // Tables with proper styling
+    /* ---------------- TABLE ---------------- */
     else if (block.type === "table") {
       children.push(
         new Table({
@@ -106,78 +101,71 @@ export function buildDocxBlocks(blocks: DocxBlock[]): any[] {
             bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
             left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
             right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-            insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-            insideVertical: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            insideHorizontal: {
+              style: BorderStyle.SINGLE,
+              size: 1,
+              color: "CCCCCC",
+            },
+            insideVertical: {
+              style: BorderStyle.SINGLE,
+              size: 1,
+              color: "CCCCCC",
+            },
           },
           rows: [
-            // Header row with styling
+            /* Header row */
             new TableRow({
-              children: block.headers.map(
-                (header: string) =>
+              children: block.headers.map((headerSegments) =>
+                new TableCell({
+                  shading: {
+                    fill: "F3F4F6",
+                    type: ShadingType.SOLID,
+                  },
+                  margins: {
+                    top: 100,
+                    bottom: 100,
+                    left: 100,
+                    right: 100,
+                  },
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.LEFT,
+                      children: segmentsToTextRuns(headerSegments, true),
+                    }),
+                  ],
+                })
+              ),
+            }),
+
+            /* Data rows */
+            ...block.rows.map((row) =>
+              new TableRow({
+                children: row.map((cellSegments) =>
                   new TableCell({
-                    children: [
-                      new Paragraph({
-                        children: [
-                          new TextRun({
-                            text: header,
-                            bold: true,
-                            size: 22,
-                          }),
-                        ],
-                        alignment: AlignmentType.LEFT,
-                      }),
-                    ],
-                    shading: {
-                      fill: "F3F4F6",
-                      type: ShadingType.SOLID,
-                    },
                     margins: {
                       top: 100,
                       bottom: 100,
                       left: 100,
                       right: 100,
                     },
+                    children: [
+                      new Paragraph({
+                        alignment: AlignmentType.LEFT,
+                        children: segmentsToTextRuns(cellSegments),
+                      }),
+                    ],
                   })
-              ),
-            }),
-
-            // Data rows
-            ...block.rows.map(
-              (row: string[]) =>
-                new TableRow({
-                  children: row.map(
-                    (cell) =>
-                      new TableCell({
-                        children: [
-                          new Paragraph({
-                            text: cell,
-                            alignment: AlignmentType.LEFT,
-                          }),
-                        ],
-                        margins: {
-                          top: 100,
-                          bottom: 100,
-                          left: 100,
-                          right: 100,
-                        },
-                      })
-                  ),
-                })
+                ),
+              })
             ),
           ],
         })
       );
 
-      // Add spacing after table
-      children.push(
-        new Paragraph({
-          text: "",
-          spacing: { after: 200 },
-        })
-      );
+      children.push(new Paragraph({ spacing: { after: 200 } }));
     }
 
-    // Code blocks
+    /* ---------------- CODE BLOCK ---------------- */
     else if (block.type === "code-block") {
       children.push(
         new Paragraph({
@@ -192,10 +180,7 @@ export function buildDocxBlocks(blocks: DocxBlock[]): any[] {
             fill: "F3F4F6",
             type: ShadingType.SOLID,
           },
-          spacing: {
-            before: 120,
-            after: 120,
-          },
+          spacing: { before: 120, after: 120 },
           border: {
             top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
             bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
@@ -206,35 +191,27 @@ export function buildDocxBlocks(blocks: DocxBlock[]): any[] {
       );
     }
 
-    // Blockquotes
+    /* ---------------- BLOCKQUOTE ---------------- */
     else if (block.type === "blockquote") {
       children.push(
         new Paragraph({
-          children: segmentsToTextRuns(block.segments).map(run => 
-            new TextRun({
-              ...run,
-              italics: true,
-            })
+          children: segmentsToTextRuns(block.segments).map(
+            (textRun) =>
+              new TextRun({
+                ...textRun,
+                italics: true,
+              })
           ),
-          indent: {
-            left: 720, // 0.5 inch
-          },
-          spacing: {
-            before: 120,
-            after: 120,
-          },
+          indent: { left: 720 },
+          spacing: { before: 120, after: 120 },
           border: {
-            left: {
-              style: BorderStyle.SINGLE,
-              size: 6,
-              color: "CCCCCC",
-            },
+            left: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" },
           },
         })
       );
     }
 
-    // Horizontal dividers
+    /* ---------------- DIVIDER ---------------- */
     else if (block.type === "divider") {
       children.push(
         new Paragraph({
@@ -245,14 +222,11 @@ export function buildDocxBlocks(blocks: DocxBlock[]): any[] {
               color: "CCCCCC",
             },
           },
-          spacing: {
-            before: 120,
-            after: 120,
-          },
+          spacing: { before: 120, after: 120 },
         })
       );
     }
-  });
+  }
 
   return children;
 }

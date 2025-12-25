@@ -6,6 +6,8 @@ import React, { useState, useRef, useEffect } from "react";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import { marked } from "marked";
+
 import {
   Send,
   Upload,
@@ -44,6 +46,7 @@ import { parseContent } from "@/lib/docx/parseContent";
 import { buildDocxBlocks } from "@/lib/docx/buildDocx";
 import { buildCoverPage, buildFooter } from "@/lib/docx/cover";
 import { PiaProgressResponse } from "@/lib/types";
+import { Document, Packer, Paragraph } from "docx";
 
 interface ChatPanelProps {
   session: any;
@@ -511,96 +514,133 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     }
   };
 
-  // const downloadDocx = async (isDraft = false) => {
-  //   if (acceptedMessages.length === 0) {
-  //     toast.error("No accepted drafts", {
-  //       description: "Please accept at least one draft before exporting",
-  //     });
-  //     return;
-  //   }
+  const handleExportPIA = async () => {
+    if (!selectedProject) return;
+    try {
+      // Fetch all accepted messages for the current project
+      const allMessages = await piaChatApi.getMessages(selectedProject); // replace selectedProject with your project ID variable
+      const acceptedContent = allMessages
+        .filter((m) => m.isDraftAccepted && m.type === "assistant")
+        .map((m) => m.content);
 
-  //   try {
-  //     // Build content directly from accepted message content
-  //     const contentBlocks = acceptedMessages.flatMap((msg) =>
-  //       buildDocxBlocks(parseContent(msg))
-  //     );
+      if (!acceptedContent.length) {
+        toast.error("Nothing to export", {
+          description: "No accepted drafts found"
+        });
+        return;
+      }
 
-  //     const doc = new Document({
-  //       sections: [
-  //         {
-  //           // Only add footer for professional version
-  //           footers: isDraft
-  //             ? undefined
-  //             : { default: buildFooter("PIA Project") },
-  //           children: isDraft
-  //             ? contentBlocks // Draft: just the messages
-  //             : [
-  //               ...buildCoverPage("PIA Project", "Organization Name"), // Professional: cover page
-  //               ...contentBlocks, // Actual accepted message content
-  //               // Optional: page break if needed
-  //               new Paragraph({ pageBreakBefore: true }),
-  //             ],
-  //         },
-  //       ],
-  //     });
+      // Convert accepted markdown content into DOCX blocks
+      const contentBlocks = acceptedContent.flatMap((content) =>
+        buildDocxBlocks(parseContent(content))
+      );
 
-  //     const blob = await Packer.toBlob(doc);
-  //     const url = URL.createObjectURL(blob);
+      const doc = new Document({
+        sections: [
+          {
+            footers: {
+              default: buildFooter("PIA Project"),
+            },
+            children: [
+              ...buildCoverPage("PIA Project", "Organization Name"),
+              ...contentBlocks,
+              new Paragraph({ pageBreakBefore: true }),
+            ],
+          },
+        ],
+      });
 
-  //     const a = document.createElement("a");
-  //     a.href = url;
-  //     a.download = isDraft ? "PIA-Draft-Export.docx" : "PIA-Professional.docx";
-  //     a.click();
+      const blob = await Packer.toBlob(doc);
+      const url = URL.createObjectURL(blob);
 
-  //     URL.revokeObjectURL(url);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "PIA-Document.docx";
+      a.click();
 
-  //     toast.success("Document exported", {
-  //       description: `Successfully exported ${acceptedMessages.length
-  //         } accepted draft${acceptedMessages.length > 1 ? "s" : ""}`,
-  //     });
-  //   } catch (error) {
-  //     console.error("Error exporting document:", error);
-  //     toast.error("Export failed", {
-  //       description:
-  //         error instanceof Error ? error.message : "Unknown error occurred",
-  //     });
-  //   }
-  // };
+      URL.revokeObjectURL(url);
+
+      toast.success("Export Complete", {
+        description: "PIA document downloaded successfully",
+      });
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast.error("Export failed", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      });
+    }
+  };
 
   const handleCopyToClipboard = async (content: string) => {
     try {
-      // Remove markdown formatting for clean copy
-      const cleanContent = content
-        .replace(/\*\*(.*?)\*\*/g, "$1") // Bold
-        .replace(/\*(.*?)\*/g, "$1") // Italic
-        .replace(/`(.*?)`/g, "$1") // Code
-        .replace(/#{1,6}\s/g, "") // Headers
-        .trim();
+      // Convert Markdown → HTML
+      const htmlContent = marked.parse(content);
 
-      // Clipboard API works on secure context (HTTPS or localhost)
+      // Styled HTML for proper MS Word rendering
+      const styledHtml = `
+      <html>
+        <head>
+          <style>
+            table {
+              border-collapse: collapse;
+              width: 100%;
+              margin: 12px 0;
+            }
+            th, td {
+              border: 1px solid #000;
+              padding: 8px 10px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              font-weight: bold;
+              background-color: #f2f2f2;
+            }
+          </style>
+        </head>
+        <body style="font-family: Calibri, Arial, sans-serif; line-height: 1.5;">
+          ${htmlContent}
+        </body>
+      </html>
+    `;
+
+      // Secure context (HTTPS / localhost)
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(cleanContent);
+        const clipboardItem = new ClipboardItem({
+          "text/html": new Blob([styledHtml], { type: "text/html" }),
+          "text/plain": new Blob([content], { type: "text/plain" }),
+        });
+
+        await navigator.clipboard.write([clipboardItem]);
       } else {
-        // Fallback for insecure context (HTTP)
-        const textarea = document.createElement("textarea");
-        textarea.value = cleanContent;
-        textarea.style.position = "fixed"; // Avoid scrolling
-        textarea.style.top = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
+        // Fallback for HTTP or older browsers
+        const container = document.createElement("div");
+        container.innerHTML = styledHtml;
+        container.style.position = "fixed";
+        container.style.left = "-9999px";
+
+        document.body.appendChild(container);
+
+        const range = document.createRange();
+        range.selectNodeContents(container);
+
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
         document.execCommand("copy");
-        document.body.removeChild(textarea);
+        document.body.removeChild(container);
       }
 
       toast.success("Copied to clipboard", {
-        description: "Clean text has been copied to your clipboard",
+        description: "Formatted content with table borders is ready for Word",
       });
     } catch (error) {
-      toast.error("Failed to copy", {
-        description: "Could not copy to clipboard",
-      });
       console.error("Copy failed:", error);
+      toast.error("Failed to copy", {
+        description: "Could not copy formatted content",
+      });
     }
   };
 
@@ -1055,7 +1095,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                 <div
                   className={`flex flex-col ${message.content.includes("---SECTION_BREAK---")
                     ? "w-full max-w-full"
-                    : `max-w-[85%] sm:max-w-xl lg:max-w-2xl ${message.isSectionSteps ? "xl:max-w-4xl" : "xl:max-w-2xl"}`
+                    : `max-w-[85%] sm:max-w-3xl lg:max-w-4xl xl:max-w-5xl xxl:max-w-6xl`
 
                     } ${message.type === "user" ? "items-end" : "items-start"}`}
                 >
@@ -1203,52 +1243,67 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                       message.attachments && message.attachments.length > 0
                     ) && (
                       <div className="mt-3 flex flex-wrap gap-2 w-full">
-                        <button
-                          onClick={() => handleAcceptDraft(message)}
-                          disabled={
-                            isLoading ||
-                            projectStatus === "Completed" ||
-                            message.isDraftAccepted
-                          }
-                          className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all
+                        {message.content.includes("**PIA Completed!**") ? (
+                          // Show only Export PIA button when PIA is completed
+                          <button
+                            onClick={handleExportPIA}
+                            disabled={isLoading}
+                            className="px-4 py-2 rounded-lg bg-[linear-gradient(90deg,#10b981,#22c55e,#16a34a)] bg-[length:200%_100%] text-white border border-white/20 text-sm font-medium flex items-center gap-2 transition-all duration-300 ease-out hover:bg-[position:100%_0%] hover:shadow-md hover:shadow-emerald-500/30 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Download className="w-4 h-4" />
+                            Export PIA
+                          </button>
+                        ) : (
+                          // Show normal action buttons when PIA is not completed
+                          <>
+                            <button
+                              onClick={() => handleAcceptDraft(message)}
+                              disabled={
+                                isLoading ||
+                                projectStatus === "Completed" ||
+                                message.isDraftAccepted
+                              }
+                              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all
         ${message.isDraftAccepted
-                              ? "bg-gray-400 text-white cursor-not-allowed"
-                              : "bg-green-600 text-white hover:bg-green-700"
-                            }
+                                  ? "bg-gray-400 text-white cursor-not-allowed"
+                                  : "bg-green-600 text-white hover:bg-green-700"
+                                }
       `}
-                        >
-                          <Check className="w-4 h-4" />
-                          {message.isDraftAccepted
-                            ? "Accepted"
-                            : "Accept Draft"}
-                        </button>
+                            >
+                              <Check className="w-4 h-4" />
+                              {message.isDraftAccepted
+                                ? "Accepted"
+                                : "Accept Draft"}
+                            </button>
 
-                        <button
-                          onClick={() => handleCopyToClipboard(message.content)}
-                          disabled={isLoading || projectStatus === "Completed"}
-                          className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 text-violet-600 dark:text-violet-400 border-2 border-violet-200 dark:border-violet-700 text-sm font-medium flex items-center gap-2 hover:bg-violet-50 dark:hover:bg-gray-700 hover:border-violet-400 dark:hover:border-violet-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Copy className="w-4 h-4" />
-                          Copy to Clipboard
-                        </button>
+                            <button
+                              onClick={() => handleCopyToClipboard(message.content)}
+                              disabled={isLoading || projectStatus === "Completed"}
+                              className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 text-violet-600 dark:text-violet-400 border-2 border-violet-200 dark:border-violet-700 text-sm font-medium flex items-center gap-2 hover:bg-violet-50 dark:hover:bg-gray-700 hover:border-violet-400 dark:hover:border-violet-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Copy className="w-4 h-4" />
+                              Copy to Clipboard
+                            </button>
 
-                        <button
-                          onClick={() => handleModifyAnswer(message)}
-                          disabled={isLoading || projectStatus === "Completed"}
-                          className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Edit className="w-4 h-4" />
-                          Modify Answer
-                        </button>
+                            <button
+                              onClick={() => handleModifyAnswer(message)}
+                              disabled={isLoading || projectStatus === "Completed"}
+                              className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Edit className="w-4 h-4" />
+                              Modify Answer
+                            </button>
 
-                        <button
-                          onClick={() => handleCompletePIA(message)}
-                          disabled={isLoading || projectStatus === "Completed"}
-                          className="px-4 py-2 rounded-lg bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 text-sm font-medium flex items-center gap-2 hover:from-violet-600 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <FileCheck className="w-4 h-4" />
-                          Complete PIA
-                        </button>
+                            <button
+                              onClick={() => handleCompletePIA(message)}
+                              disabled={isLoading || projectStatus === "Completed" || !messages.some(msg => msg.isDraftAccepted === true)}
+                              className="px-4 py-2 rounded-lg bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 text-sm font-medium flex items-center gap-2 hover:from-violet-600 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <FileCheck className="w-4 h-4" />
+                              Complete PIA
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
 
