@@ -1,7 +1,13 @@
 // components/pia/chat-panel.tsx
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 // import { Document, Packer, Paragraph, TextRun } from "docx";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -48,6 +54,8 @@ import { buildCoverPage, buildFooter } from "@/lib/docx/cover";
 import { PiaProgressResponse } from "@/lib/types";
 import { Document, Packer, Paragraph } from "docx";
 
+import { ConfirmationModal } from "@/components/ui/confirmation-modal";
+
 interface ChatPanelProps {
   session: any;
   selectedProject: string | null;
@@ -70,6 +78,8 @@ interface Message {
   isActionResponse?: boolean;
   isDraftAccepted?: boolean;
   isSectionSteps?: boolean;
+  isPersisted?: boolean; // Track if documents have been saved to DB
+  sectionId?: string; // Link to PIASection
 }
 
 interface PIASection {
@@ -102,16 +112,19 @@ const getFileIcon = (fileName: string) => {
   return "📎";
 };
 
-export function ChatPanel({
-  session,
-  selectedProject,
-  isSidebarOpen,
-  isFullWidth = false,
-  onProjectUpdate,
-  projectStatus,
-  projectId,
-  projectTitle,
-}: ChatPanelProps) {
+export const ChatPanel = forwardRef(function ChatPanel(
+  {
+    session,
+    selectedProject,
+    isSidebarOpen,
+    isFullWidth = false,
+    onProjectUpdate,
+    projectStatus,
+    projectId,
+    projectTitle,
+  }: ChatPanelProps,
+  ref
+) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isViewDocsModalOpen, setIsViewDocsModalOpen] = useState(false);
   const [isModifyPanelOpen, setIsModifyPanelOpen] = useState(false);
@@ -128,6 +141,13 @@ export function ChatPanel({
     label: string;
     value: string;
   } | null>(null);
+  const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
+  const [pendingSectionInfo, setPendingSectionInfo] = useState<{
+    label: string;
+    value: string;
+  } | null>(null);
+  const [pendingAcceptMessage, setPendingAcceptMessage] =
+    useState<Message | null>(null);
 
   const triggerDocumentRefresh = useUIStore(
     (state) => state.triggerDocumentRefresh
@@ -220,6 +240,8 @@ export function ChatPanel({
         isActionResponse: msg.isActionResponse,
         isDraftAccepted: msg.isDraftAccepted,
         isSectionSteps: msg.isSectionSteps,
+        isPersisted: true, // Messages loaded from DB are already persisted
+        sectionId: msg.sectionId, // Include sectionId from the message
       }));
 
       setMessages(formattedMessages);
@@ -274,6 +296,22 @@ export function ChatPanel({
       type: f.type,
     }));
 
+    // Extract action from selectedSectionInfo if it exists
+    const action = (selectedSectionInfo as any)?.action;
+
+    // Create user message to display immediately
+    const userMessage: Message = {
+      id: `temp-${Date.now()}`,
+      type: "user",
+      content,
+      timestamp: new Date(),
+      attachments: attachments.length > 0 ? attachments : undefined,
+      status: "completed",
+    };
+
+    // Add user message to state immediately
+    setMessages((prev) => [...prev, userMessage]);
+
     setInputValue("");
     setAttachedFiles([]);
     setIsLoading(true);
@@ -293,15 +331,17 @@ export function ChatPanel({
         selectedProject,
         selectedSectionInfo?.value ?? "custom",
         selectedSectionInfo?.label ?? "Custom Query",
-        content
+        content,
+        action // Pass the action (replace/append) if present
       );
 
-      // 3. Save ASSISTANT message
+      // 3. Save ASSISTANT message with sectionId link
       await piaChatApi.saveMessage({
         projectId: selectedProject,
         type: "assistant",
         content: section.content,
         status: "completed",
+        sectionId: section.id, // Link message to section
       });
 
       // 4. Refetch from DB
@@ -332,21 +372,23 @@ export function ChatPanel({
     }
 
     if (validFiles.length > 0) {
-      // Create user message showing uploaded files
+      // Create user message showing uploaded files (local state only, not persisted to DB yet)
       const userMessage: Message = {
         id: Date.now().toString(),
         type: "user",
-        content: `Uploaded ${validFiles.length} document${validFiles.length > 1 ? "s" : ""
-          }`,
+        content: `Uploaded ${validFiles.length} document${
+          validFiles.length > 1 ? "s" : ""
+        }`,
         timestamp: new Date(),
         attachments: validFiles.map((f) => ({
           name: f.name,
           type: f.type || f.name.split(".").pop() || "file",
         })),
+        isPersisted: false, // Documents not saved to DB yet
       };
 
       setMessages((prev) => [...prev, userMessage]);
-      saveMessageToDb(userMessage);
+      // Do NOT save to DB yet - documents should only be saved after execution completes
 
       const isInProgress = projectStatus === "In Progress";
       const isMultiple = validFiles.length > 1;
@@ -360,10 +402,12 @@ export function ChatPanel({
         : "Execute PIA Section Generation";
 
       const assistantMessage = isInProgress
-        ? `I've added your ${validFiles.length
-        } ${documentLabel} to the existing project context.
-${isMultiple ? "These documents have" : "This document has"
-        } been indexed and will be used alongside your previously uploaded materials.
+        ? `I've added your ${
+            validFiles.length
+          } ${documentLabel} to the existing project context.
+${
+  isMultiple ? "These documents have" : "This document has"
+} been indexed and will be used alongside your previously uploaded materials.
 Click "Execute indexing of ${documentRef}" to index ${pronoun} and continue working on your current PIA.`
         : `Perfect! I've received your ${validFiles.length} ${documentLabel}.
 Click "Execute PIA" below to process ${pronoun} and begin generating your Privacy Impact Assessment sections.`;
@@ -390,8 +434,9 @@ Click "Execute PIA" below to process ${pronoun} and begin generating your Privac
       setAttachedFiles(validFiles);
 
       toast.success("Documents uploaded", {
-        description: `${validFiles.length} document${validFiles.length > 1 ? "s" : ""
-          } ready to process`,
+        description: `${validFiles.length} document${
+          validFiles.length > 1 ? "s" : ""
+        } ready to process`,
       });
     }
 
@@ -406,6 +451,14 @@ Click "Execute PIA" below to process ${pronoun} and begin generating your Privac
       const userMsg = prev.find((m) => m.id === messageId);
 
       if (!userMsg) return prev;
+
+      // Don't allow removal if documents have been persisted to database
+      if (userMsg.isPersisted) {
+        toast.error("Cannot remove", {
+          description: "Documents have already been processed and saved",
+        });
+        return prev;
+      }
 
       // Compute updated attachments after removal
       const updatedUserAttachments =
@@ -423,19 +476,25 @@ Click "Execute PIA" below to process ${pronoun} and begin generating your Privac
             return {
               ...msg,
               attachments: updatedUserAttachments,
-              content: `Uploaded ${updatedUserAttachments.length} document${updatedUserAttachments.length > 1 ? "s" : ""
-                }`,
+              content: `Uploaded ${updatedUserAttachments.length} document${
+                updatedUserAttachments.length > 1 ? "s" : ""
+              }`,
             };
           }
 
           // Update assistant message linked to this user message
-          if (msg.type === "assistant" && msg.actions?.some(a => a.value === "execute-pia")) {
+          if (
+            msg.type === "assistant" &&
+            msg.actions?.some((a) => a.value === "execute-pia")
+          ) {
             if (updatedUserAttachments.length === 0) return null;
 
             const remainingCount = updatedUserAttachments.length;
             const isMultiple = remainingCount > 1;
             const documentLabel = isMultiple ? "documents" : "document";
-            const documentRef = isMultiple ? "these documents" : "this document";
+            const documentRef = isMultiple
+              ? "these documents"
+              : "this document";
             const pronoun = isMultiple ? "them" : "it";
 
             const isInProgress = projectStatus === "In Progress";
@@ -445,7 +504,9 @@ Click "Execute PIA" below to process ${pronoun} and begin generating your Privac
 
             const assistantMessage = isInProgress
               ? `I've added your ${remainingCount} ${documentLabel} to the existing project context.
-${isMultiple ? "These documents have" : "This document has"} been indexed and will be used alongside your previously uploaded materials.
+${
+  isMultiple ? "These documents have" : "This document has"
+} been indexed and will be used alongside your previously uploaded materials.
 Click "Execute indexing of ${documentRef}" to index ${pronoun} and continue working on your current PIA.`
               : `Perfect! I've received your ${remainingCount} ${documentLabel}.
 Click "Execute PIA" below to process ${pronoun} and begin generating your Privacy Impact Assessment sections.`;
@@ -471,12 +532,60 @@ Click "Execute PIA" below to process ${pronoun} and begin generating your Privac
     setAttachedFiles((prev) => prev.filter((_, i) => i !== fileIndex));
   };
 
-
-
-
   const handleAcceptDraft = async (message: Message) => {
     try {
-      await piaChatApi.acceptDraft(message.id);
+      // Check if this message is linked to a section
+      if (!selectedProject) {
+        await acceptDraftDirectly(message);
+        return;
+      }
+
+      if (!message.sectionId) {
+        await acceptDraftDirectly(message);
+        return;
+      }
+
+      // First get the section details to know its type
+      const section = await piaSectionsApi.getSection(message.sectionId);
+
+      if (!section) {
+        await acceptDraftDirectly(message);
+        return;
+      }
+
+      // Now check if there's already an accepted draft for this section type
+      const sectionCheck = await piaSectionsApi.checkSection(
+        selectedProject,
+        section.sectionType
+      );
+
+      if (sectionCheck.exists === true && sectionCheck.isAccepted === true) {
+        // Store pending section info and message for later acceptance
+        setPendingSectionInfo({
+          label: section.sectionName,
+          value: section.sectionType,
+        });
+        setPendingAcceptMessage(message);
+        setIsConfirmationModalOpen(true);
+        return;
+      }
+
+      // If no existing section or not accepted, proceed normally
+      await acceptDraftDirectly(message);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+
+      toast.error("Failed to accept draft", { description: errorMessage });
+    }
+  };
+
+  const acceptDraftDirectly = async (
+    message: Message,
+    action: "replace" | "append" = "replace"
+  ) => {
+    try {
+      await piaChatApi.acceptDraft(message.id, action);
 
       // Save accepted draft to project
       await fetch(`/api/projects/${selectedProject}`, {
@@ -503,6 +612,11 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       await loadChatHistory();
       triggerDocumentRefresh();
 
+      // Trigger sidebar section status refresh
+      if (onProjectUpdate) {
+        onProjectUpdate();
+      }
+
       toast.success("Draft accepted", {
         description: "The response has been accepted and saved",
       });
@@ -525,7 +639,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
       if (!acceptedContent.length) {
         toast.error("Nothing to export", {
-          description: "No accepted drafts found"
+          description: "No accepted drafts found",
         });
         return;
       }
@@ -644,7 +758,6 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     }
   };
 
-
   const handleModifyAnswer = (message: Message) => {
     setIsModifyPanelOpen(true);
     setPreviousResponse(message.content);
@@ -720,15 +833,17 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     return () => clearInterval(intervalId);
   };
 
-
-
   const handleExecutePIA = async () => {
     if (attachedFiles.length === 0) {
-      toast.error("No files to process", { description: "Please upload documents first" });
+      toast.error("No files to process", {
+        description: "Please upload documents first",
+      });
       return;
     }
     if (!selectedProject) {
-      toast.error("No project selected", { description: "Please select a project to execute PIA" });
+      toast.error("No project selected", {
+        description: "Please select a project to execute PIA",
+      });
       return;
     }
 
@@ -738,12 +853,15 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     let stopPolling: (() => void) | null = null;
 
     try {
-      toast.info("Processing documents", { description: `${attachedFiles.length} file(s) uploaded.` });
+      toast.info("Processing documents", {
+        description: `${attachedFiles.length} file(s) uploaded.`,
+      });
 
       // start polling
       stopPolling = pollPiaProgress(selectedProject, (progress) => {
         if (progress.status_list?.length > 0) {
-          const latestMsg = progress.status_list[progress.status_list.length - 1];
+          const latestMsg =
+            progress.status_list[progress.status_list.length - 1];
           setPiaProgressMsg(latestMsg);
         }
       });
@@ -756,6 +874,35 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
       // rest of your success logic
       const totalFiles = attachedFiles.length;
+
+      // NOW save the user message with attachments to DB since execution is complete
+      const uploadedDocsMessage = messages.find(
+        (m) =>
+          m.type === "user" &&
+          m.attachments &&
+          m.attachments.length > 0 &&
+          !m.isPersisted
+      );
+
+      if (uploadedDocsMessage) {
+        await piaChatApi.saveMessage({
+          projectId: selectedProject!,
+          type: "user",
+          content: uploadedDocsMessage.content,
+          attachments: uploadedDocsMessage.attachments,
+          status: "completed",
+        });
+
+        // Mark message as persisted in local state
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === uploadedDocsMessage.id
+              ? { ...msg, isPersisted: true }
+              : msg
+          )
+        );
+      }
+
       setAttachedFiles([]);
       setHasUploadedFiles(true);
 
@@ -765,8 +912,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
         body: JSON.stringify({ status: "In Progress" }),
       });
 
-      onProjectUpdate?.();;
-
+      onProjectUpdate?.();
 
       await piaChatApi.saveMessage({
         projectId: selectedProject!,
@@ -776,12 +922,14 @@ The modifications have been successfully saved. I am ready for the next step. Pl
         isSectionSteps: true,
       });
 
-
-      toast.success("PIA Execution Complete", { description: `All ${totalFiles} document(s) processed successfully` });
+      toast.success("PIA Execution Complete", {
+        description: `All ${totalFiles} document(s) processed successfully`,
+      });
     } catch (error) {
       stopPolling?.(); // ensure polling stops on error
 
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
 
       const errorResponse: Message = {
         id: Date.now().toString(),
@@ -798,12 +946,10 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     } finally {
       setIsLoading(false);
       setShowProgressMsg(false);
-      setPiaProgressMsg("")
+      setPiaProgressMsg("");
       await loadChatHistory();
     }
   };
-
-
 
   const handleSectionClick = async (
     sectionLabel: string,
@@ -818,24 +964,99 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     setIsLoading(true);
 
     try {
-      // Look up prompt using the section value (which now matches the key in piaPrompts)
-      const promptFromFile = piaPrompts[sectionValue];
+      // Always proceed to load the section prompt without checking
+      await loadSectionPrompt(sectionLabel, sectionValue);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
 
-      if (!promptFromFile) {
-        throw new Error("Prompt not found for this section");
+      toast.error("Failed to load section", {
+        description: errorMessage,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadSectionPrompt = async (
+    sectionLabel: string,
+    sectionValue: string,
+    action?: "replace" | "append"
+  ) => {
+    // Look up prompt using the section value (which now matches the key in piaPrompts)
+    const promptFromFile = piaPrompts[sectionValue];
+
+    if (!promptFromFile) {
+      throw new Error("Prompt not found for this section");
+    }
+
+    setInputValue(promptFromFile);
+
+    const sectionInfo: {
+      label: string;
+      value: string;
+      action?: "replace" | "append";
+    } = {
+      label: sectionLabel,
+      value: sectionValue,
+    };
+
+    if (action) {
+      sectionInfo.action = action;
+    }
+
+    setSelectedSectionInfo(sectionInfo as any);
+
+    toast.success("Prompt loaded", {
+      description: "You can now edit the prompt before generating the section",
+    });
+  };
+
+  const handleConfirmationModalAction = async (
+    action: "replace" | "append"
+  ) => {
+    setIsConfirmationModalOpen(false);
+
+    // If we have a pending accept message, handle accept flow
+    if (pendingAcceptMessage) {
+      try {
+        setIsLoading(true);
+
+        // Pass the action to acceptDraftDirectly
+        await acceptDraftDirectly(pendingAcceptMessage, action);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+
+        toast.error("Failed to accept draft", {
+          description: errorMessage,
+        });
+      } finally {
+        setIsLoading(false);
+        setPendingAcceptMessage(null);
+        setPendingSectionInfo(null);
       }
+      return;
+    }
 
-      setInputValue(promptFromFile);
+    // Otherwise, handle section generation flow
+    if (!pendingSectionInfo) return;
 
-      setSelectedSectionInfo({
-        label: sectionLabel,
-        value: sectionValue,
-      });
+    try {
+      setIsLoading(true);
 
-      toast.success("Prompt loaded", {
-        description:
-          "You can now edit the prompt before generating the section",
-      });
+      // Load the prompt with the action included
+      await loadSectionPrompt(
+        pendingSectionInfo.label,
+        pendingSectionInfo.value,
+        action
+      );
+
+      toast.info(
+        action === "replace"
+          ? "Section will be replaced when generated"
+          : "New section version will be created when generated"
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
@@ -845,8 +1066,14 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       });
     } finally {
       setIsLoading(false);
+      setPendingSectionInfo(null);
     }
   };
+
+  // Expose handleSectionClick to parent components via ref
+  useImperativeHandle(ref, () => ({
+    handleSectionClick,
+  }));
 
   if (!selectedProject) {
     return (
@@ -897,21 +1124,46 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       if (typeof child === "string") {
         // Regex to match citations like [Source 14, Page 1] or [1] or [Smith et al.]
         const parts = child.split(/(\[[^\]]+\])/g);
+        const elements: React.ReactNode[] = [];
 
-        return parts.map((part, idx) => {
+        parts.forEach((part, idx) => {
           if (/^\[[^\]]+\]$/.test(part)) {
-            return (
+            // Extract document name from citation
+            const citationText = part.replace(/[\[\]]/g, "");
+            // Try to extract document name (before comma or page reference)
+            const docName = citationText.split(",")[0].trim();
+
+            // Display as a clickable pill with icon and document name (ChatGPT style)
+            elements.push(
               <span
                 key={idx}
-                className="text-blue-800 dark:text-blue-400 hover:underline cursor-pointer font-medium transition-colors hover:text-blue-900 dark:hover:text-blue-300"
+                className="inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-full cursor-pointer transition-all text-xs align-middle border border-blue-200 dark:border-blue-800"
                 onClick={() => handleCitationClick(part)}
+                title={citationText}
               >
-                {part}
+                <svg
+                  className="w-3 h-3 text-gray-600 dark:text-gray-300"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span className="text-gray-700 dark:text-gray-200 font-medium max-w-[200px] truncate">
+                  {docName}
+                </span>
               </span>
             );
+          } else {
+            elements.push(<span key={idx}>{part}</span>);
           }
-          return <span key={idx}>{part}</span>;
         });
+
+        return elements;
       }
       return child;
     });
@@ -921,22 +1173,30 @@ The modifications have been successfully saved. I am ready for the next step. Pl
   const markdownComponents: Components = {
     h1: ({ children }) => (
       <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3 border-b dark:border-gray-700 pb-1">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </h1>
     ),
     h2: ({ children }) => (
       <h2 className="text-base font-semibold text-indigo-700 dark:text-indigo-400 mb-2">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </h2>
     ),
     h3: ({ children }) => (
       <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2 uppercase tracking-wide">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </h3>
     ),
     p: ({ children }) => (
       <p className="mb-2 last:mb-0 leading-relaxed text-gray-800 dark:text-gray-200">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </p>
     ),
     ul: ({ children }) => (
@@ -947,22 +1207,30 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     ),
     li: ({ children }) => (
       <li className="text-sm">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </li>
     ),
     blockquote: ({ children }) => (
       <blockquote className="border-l-4 border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-4 py-2 rounded-r-md text-sm italic my-3">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </blockquote>
     ),
     strong: ({ children }) => (
       <strong className="font-semibold text-gray-900 dark:text-gray-100">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </strong>
     ),
     em: ({ children }) => (
       <em className="italic text-gray-700 dark:text-gray-300">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </em>
     ),
     code: ({ children, className }) => {
@@ -984,12 +1252,16 @@ The modifications have been successfully saved. I am ready for the next step. Pl
     ),
     th: ({ children }) => (
       <th className="border border-gray-300 dark:border-gray-700 px-3 py-1 bg-gray-100 dark:bg-gray-800 text-left text-sm">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </th>
     ),
     td: ({ children }) => (
       <td className="border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm">
-        <TextWithCitations projectId={selectedProject}>{children}</TextWithCitations>
+        <TextWithCitations projectId={selectedProject}>
+          {children}
+        </TextWithCitations>
       </td>
     ),
   };
@@ -997,8 +1269,9 @@ The modifications have been successfully saved. I am ready for the next step. Pl
   // console.log(messages, "the mesgs")
   return (
     <div
-      className={`${isFullWidth ? "flex-1" : "w-full lg:w-1/2"
-        } flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 h-full overflow-hidden`}
+      className={`${
+        isFullWidth ? "flex-1" : "w-full lg:w-1/2"
+      } flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 h-full overflow-hidden`}
     >
       {/* Chat Header - EXECUTE BUTTON REMOVED FROM HERE */}
       <div className="px-4 lg:px-6 py-3 lg:py-4 border-b border-gray-200 dark:border-gray-700 bg-linear-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-800 shrink-0">
@@ -1081,8 +1354,9 @@ The modifications have been successfully saved. I am ready for the next step. Pl
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex gap-4 ${message.type === "user" ? "justify-end" : "justify-start"
-                  }`}
+                className={`flex gap-4 ${
+                  message.type === "user" ? "justify-end" : "justify-start"
+                }`}
               >
                 {message.type === "assistant" && (
                   <div className="w-10 h-10 bg-linear-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shrink-0">
@@ -1093,19 +1367,20 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                 )}
 
                 <div
-                  className={`flex flex-col ${message.content.includes("---SECTION_BREAK---")
-                    ? "w-full max-w-full"
-                    : `max-w-[85%] sm:max-w-3xl lg:max-w-4xl xl:max-w-5xl xxl:max-w-6xl`
-
-                    } ${message.type === "user" ? "items-end" : "items-start"}`}
+                  className={`flex flex-col ${
+                    message.content.includes("---SECTION_BREAK---")
+                      ? "w-full max-w-full"
+                      : `max-w-[85%] sm:max-w-3xl lg:max-w-4xl xl:max-w-5xl xxl:max-w-6xl`
+                  } ${message.type === "user" ? "items-end" : "items-start"}`}
                 >
                   <div
                     className={`
           px-3 lg:px-4 py-2 lg:py-3 rounded-2xl shadow-sm wrap-break-word
-          ${message.type === "user"
-                        ? "bg-linear-to-r from-blue-600 to-indigo-600 text-white"
-                        : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      }
+          ${
+            message.type === "user"
+              ? "bg-linear-to-r from-blue-600 to-indigo-600 text-white"
+              : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+          }
         `}
                   >
                     {/* FILE ATTACHMENTS WITH ICONS - THIS IS WHERE DOCUMENTS SHOW */}
@@ -1123,14 +1398,14 @@ The modifications have been successfully saved. I am ready for the next step. Pl
            
           "
                             >
-
-                              {/* Remove Button (Lucide X, appears on hover) */}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRemoveAttachment(message.id, idx);
-                                }}
-                                className="
+                              {/* Remove Button (Lucide X) - Only show if documents not persisted to DB yet */}
+                              {!message.isPersisted && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveAttachment(message.id, idx);
+                                  }}
+                                  className="
     
       p-0.5 rounded-full
       opacity-0 group-hover:opacity-100
@@ -1138,10 +1413,11 @@ The modifications have been successfully saved. I am ready for the next step. Pl
       text-gray-400 hover:text-black
       hover:bg-red-50 dark:hover:bg-gray-600
     "
-                                aria-label="Remove file"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
+                                  aria-label="Remove file"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              )}
                               {/* File Icon */}
                               <span className="text-xl">
                                 {getFileIcon(file.name)}
@@ -1151,10 +1427,7 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                               <span className="truncate flex-1">
                                 {file.name}
                               </span>
-
-
                             </div>
-
                           ))}
                         </div>
                       </div>
@@ -1162,19 +1435,27 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
                     {message.content.includes("---SECTION_BREAK---") ? (
                       (() => {
-                        const [header, content] = message.content.split("---SECTION_BREAK---");
+                        const [header, content] = message.content.split(
+                          "---SECTION_BREAK---"
+                        );
                         return (
                           <>
                             {/* Section Header */}
                             <div className="mb-4 prose prose-sm max-w-none">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={markdownComponents}
+                              >
                                 {header}
                               </ReactMarkdown>
                             </div>
 
                             {/* Section Body */}
                             <div className="formatted-section prose prose-sm max-w-none">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={markdownComponents}
+                              >
                                 {content}
                               </ReactMarkdown>
                             </div>
@@ -1183,13 +1464,20 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                       })()
                     ) : (
                       <div
-                        className={`text-sm leading-relaxed ${message.type === "user" ? "" : "prose prose-sm max-w-none"
-                          }`}
+                        className={`text-sm leading-relaxed ${
+                          message.type === "user"
+                            ? ""
+                            : "prose prose-sm max-w-none"
+                        }`}
                       >
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           rehypePlugins={[rehypeRaw]}
-                          components={message.type === "user" ? undefined : markdownComponents}
+                          components={
+                            message.type === "user"
+                              ? undefined
+                              : markdownComponents
+                          }
                         >
                           {message.content}
                         </ReactMarkdown>
@@ -1211,12 +1499,13 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                             disabled={isLoading}
                             className={`
                   text-left px-4 py-3 rounded-lg transition-all text-sm font-medium flex items-center gap-2
-                  ${isExecuteButton
-                                ? "w-full bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 hover:from-violet-600 hover:to-indigo-700"
-                                : idx === 0
-                                  ? "flex-1 min-w-[calc(50%-0.25rem)] bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 hover:from-violet-600 hover:to-indigo-700"
-                                  : "flex-1 min-w-[calc(50%-0.25rem)] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-gray-700"
-                              }
+                  ${
+                    isExecuteButton
+                      ? "w-full bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 hover:from-violet-600 hover:to-indigo-700"
+                      : idx === 0
+                      ? "flex-1 min-w-[calc(50%-0.25rem)] bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 hover:from-violet-600 hover:to-indigo-700"
+                      : "flex-1 min-w-[calc(50%-0.25rem)] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-gray-700"
+                  }
                   disabled:opacity-50 disabled:cursor-not-allowed
                 `}
                           >
@@ -1264,10 +1553,11 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                                 message.isDraftAccepted
                               }
                               className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all
-        ${message.isDraftAccepted
-                                  ? "bg-gray-400 text-white cursor-not-allowed"
-                                  : "bg-green-600 text-white hover:bg-green-700"
-                                }
+        ${
+          message.isDraftAccepted
+            ? "bg-gray-400 text-white cursor-not-allowed"
+            : "bg-green-600 text-white hover:bg-green-700"
+        }
       `}
                             >
                               <Check className="w-4 h-4" />
@@ -1277,8 +1567,12 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                             </button>
 
                             <button
-                              onClick={() => handleCopyToClipboard(message.content)}
-                              disabled={isLoading || projectStatus === "Completed"}
+                              onClick={() =>
+                                handleCopyToClipboard(message.content)
+                              }
+                              disabled={
+                                isLoading || projectStatus === "Completed"
+                              }
                               className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 text-violet-600 dark:text-violet-400 border-2 border-violet-200 dark:border-violet-700 text-sm font-medium flex items-center gap-2 hover:bg-violet-50 dark:hover:bg-gray-700 hover:border-violet-400 dark:hover:border-violet-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Copy className="w-4 h-4" />
@@ -1287,7 +1581,9 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
                             <button
                               onClick={() => handleModifyAnswer(message)}
-                              disabled={isLoading || projectStatus === "Completed"}
+                              disabled={
+                                isLoading || projectStatus === "Completed"
+                              }
                               className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Edit className="w-4 h-4" />
@@ -1296,7 +1592,13 @@ The modifications have been successfully saved. I am ready for the next step. Pl
 
                             <button
                               onClick={() => handleCompletePIA(message)}
-                              disabled={isLoading || projectStatus === "Completed" || !messages.some(msg => msg.isDraftAccepted === true)}
+                              disabled={
+                                isLoading ||
+                                projectStatus === "Completed" ||
+                                !messages.some(
+                                  (msg) => msg.isDraftAccepted === true
+                                )
+                              }
                               className="px-4 py-2 rounded-lg bg-linear-to-r from-violet-500 to-indigo-600 text-white border-2 border-violet-600 text-sm font-medium flex items-center gap-2 hover:from-violet-600 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <FileCheck className="w-4 h-4" />
@@ -1328,10 +1630,11 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                               disabled={isLoading}
                               className={`
             text-left px-3 py-1.5 sm:py-2.5 rounded-lg transition-all text-xs lg:text-sm font-medium flex items-center gap-2
-            ${isSelected
-                                  ? "bg-linear-to-r from-violet-500 to-indigo-600 text-white shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                }
+            ${
+              isSelected
+                ? "bg-linear-to-r from-violet-500 to-indigo-600 text-white shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            }
           `}
                             >
                               <FileText className="w-4 h-4 shrink-0" />
@@ -1368,14 +1671,13 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                 </div>
 
                 {showProgressMsg ? (
-
                   <div className="flex-1 px-1 py-3">
-
                     {/* AI Reasoning / Thinking Animated Text */}
                     <p
                       className="text-[13px] font-semibold"
                       style={{
-                        background: "linear-gradient(90deg, #8f8f8f, #c7c7c7, #8f8f8f)",
+                        background:
+                          "linear-gradient(90deg, #8f8f8f, #c7c7c7, #8f8f8f)",
                         backgroundSize: "200% 100%",
                         WebkitBackgroundClip: "text",
                         WebkitTextFillColor: "transparent",
@@ -1386,7 +1688,6 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                         ? piaProgressMsg
                         : "Analyzing the Docs..."}
                     </p>
-
 
                     {/* Inline animation style */}
                     <style>
@@ -1402,7 +1703,6 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                   <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl">
                     <Loader2 className="w-5 h-5 animate-spin text-gray-600 dark:text-gray-400" />
                   </div>
-
                 )}
               </div>
             )}
@@ -1458,10 +1758,11 @@ The modifications have been successfully saved. I am ready for the next step. Pl
                         disabled={isLoading}
                         className={`
                   text-left px-3 py-1.5 sm:py-2.5 rounded-lg transition-all text-xs lg:text-sm font-medium flex items-center gap-2
-                  ${isSelected
-                            ? "bg-linear-to-r from-violet-500 to-indigo-600 text-white shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                            : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          }
+                  ${
+                    isSelected
+                      ? "bg-linear-to-r from-violet-500 to-indigo-600 text-white shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                      : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  }
                 `}
                       >
                         <FileText className="w-4 h-4 shrink-0" />
@@ -1547,6 +1848,18 @@ The modifications have been successfully saved. I am ready for the next step. Pl
           await loadChatHistory();
         }}
       />
+
+      <ConfirmationModal
+        isOpen={isConfirmationModalOpen}
+        onClose={() => {
+          setIsConfirmationModalOpen(false);
+          setPendingSectionInfo(null);
+          setPendingAcceptMessage(null);
+        }}
+        onConfirm={handleConfirmationModalAction}
+        title="Section Already Exists"
+        message="You have already generated and accepted a draft for this section. Do you want to replace the existing section or add it as a new section?"
+      />
     </div>
   );
-}
+});

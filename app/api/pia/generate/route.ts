@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { projectId, sectionType, sectionName, query } = body;
+    const { projectId, sectionType, sectionName, query, action } = body;
 
     if (!projectId || !sectionType || !query) {
       return NextResponse.json(
@@ -49,10 +49,9 @@ export async function POST(request: NextRequest) {
 
     // 🔹 Map DB records to API history format
     const history = chatHistory.map((msg) => ({
-      role: msg.type,       // "user" | "assistant"
+      role: msg.type, // "user" | "assistant"
       content: msg.content,
     }));
-
 
     // 🔹 Call PIA API with updated payload
     const piaResponse = await piaApi.generatePIA({
@@ -71,25 +70,53 @@ export async function POST(request: NextRequest) {
     });
 
     if (section) {
-      // Save previous version
-      await prisma.pIASectionHistory.create({
-        data: {
-          sectionId: section.id,
-          content: section.content,
-          version: section.version,
-          modifiedBy: session.user.id,
-        },
-      });
+      // Determine behavior based on action parameter
+      if (action === "append") {
+        // Create a new section with a versioned name
+        const existingSections = await prisma.pIASection.findMany({
+          where: {
+            projectId,
+            sectionType,
+          },
+        });
 
-      section = await prisma.pIASection.update({
-        where: { id: section.id },
-        data: {
-          content: piaResponse.response,
-          version: section.version + 1,
-          updatedAt: new Date(),
-          generatedBy: "AI",
-        },
-      });
+        const newVersion = existingSections.length + 1;
+        const versionedName = `${
+          sectionName || sectionType
+        } (Version ${newVersion})`;
+
+        section = await prisma.pIASection.create({
+          data: {
+            projectId,
+            sectionType,
+            sectionName: versionedName,
+            content: piaResponse.response,
+            version: newVersion,
+            generatedBy: "AI",
+          },
+        });
+      } else {
+        // Default behavior: replace (update existing section)
+        // Save previous version to history
+        await prisma.pIASectionHistory.create({
+          data: {
+            sectionId: section.id,
+            content: section.content,
+            version: section.version,
+            modifiedBy: session.user.id,
+          },
+        });
+
+        section = await prisma.pIASection.update({
+          where: { id: section.id },
+          data: {
+            content: piaResponse.response,
+            version: section.version + 1,
+            updatedAt: new Date(),
+            generatedBy: "AI",
+          },
+        });
+      }
     } else {
       section = await prisma.pIASection.create({
         data: {

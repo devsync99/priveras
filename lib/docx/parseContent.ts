@@ -20,6 +20,13 @@ export type DocxBlock =
   | { type: "divider" };
 
 /**
+ * Remove citations from text (e.g., [Source 14, Page 1-23])
+ */
+function removeCitations(text: string): string {
+  return text.replace(/\[[^\]]+\]/g, "").trim();
+}
+
+/**
  * Extract text segments with formatting from node children
  */
 function extractSegments(children: any[]): TextSegment[] {
@@ -27,18 +34,34 @@ function extractSegments(children: any[]): TextSegment[] {
 
   children.forEach((child: any) => {
     if (child.type === "text") {
-      segments.push({ text: child.value });
+      // Remove citations from plain text
+      const cleanText = removeCitations(child.value);
+      if (cleanText) {
+        segments.push({ text: cleanText });
+      }
     } else if (child.type === "strong") {
-      const text = child.children.map((c: any) => c.value).join("");
-      segments.push({ text, bold: true });
+      const text = removeCitations(
+        child.children.map((c: any) => c.value).join("")
+      );
+      if (text) {
+        segments.push({ text, bold: true });
+      }
     } else if (child.type === "emphasis") {
-      const text = child.children.map((c: any) => c.value).join("");
-      segments.push({ text, italic: true });
+      const text = removeCitations(
+        child.children.map((c: any) => c.value).join("")
+      );
+      if (text) {
+        segments.push({ text, italic: true });
+      }
     } else if (child.type === "inlineCode") {
       segments.push({ text: child.value, code: true });
     } else if (child.type === "link") {
-      const text = child.children.map((c: any) => c.value).join("");
-      segments.push({ text, link: child.url });
+      const text = removeCitations(
+        child.children.map((c: any) => c.value).join("")
+      );
+      if (text) {
+        segments.push({ text, link: child.url });
+      }
     } else if (child.children) {
       // Recursively handle nested formatting (e.g., bold + italic)
       segments.push(...extractSegments(child.children));
@@ -77,7 +100,7 @@ export function parseContent(markdown: string): DocxBlock[] {
     // Lists (bullet and numbered)
     else if (node.type === "list") {
       const items: TextSegment[][] = [];
-      
+
       node.children.forEach((listItem: any) => {
         // Each list item can have multiple paragraphs
         const itemSegments: TextSegment[] = [];
@@ -100,7 +123,7 @@ export function parseContent(markdown: string): DocxBlock[] {
     else if (node.type === "table") {
       // In remark-gfm, all table rows are in node.children
       // The first row is the header, rest are data rows
-      
+
       if (node.children.length === 0) {
         return; // Skip empty tables
       }
@@ -112,11 +135,11 @@ export function parseContent(markdown: string): DocxBlock[] {
       );
 
       // Extract data rows with formatting (remaining rows)
-      const rows = node.children.slice(1).map((row: any) =>
-        row.children.map((cell: any) =>
-          extractSegments(cell.children)
-        )
-      );
+      const rows = node.children
+        .slice(1)
+        .map((row: any) =>
+          row.children.map((cell: any) => extractSegments(cell.children))
+        );
 
       blocks.push({
         type: "table",

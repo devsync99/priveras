@@ -11,6 +11,7 @@ export interface ChatMessage {
   isActionResponse?: boolean;
   isDraftAccepted?: boolean;
   isSectionSteps?: boolean;
+  sectionId?: string;
   createdAt: Date;
 }
 
@@ -24,6 +25,7 @@ export interface SaveMessageRequest {
   isActionResponse?: boolean;
   isDraftAccepted?: boolean;
   isSectionSteps?: boolean;
+  sectionId?: string;
 }
 
 export interface PiaDocument {
@@ -55,18 +57,19 @@ export interface GetDocumentByCitationResponse {
   name: string;
 }
 
-
 class PIAChatAPI {
   private baseUrl = "/api/pia/chat";
 
   /* -------------------- Get URL through citation -------------------- */
 
-   async getDocumentByCitation(
+  async getDocumentByCitation(
     projectId: string,
     citation: string
   ): Promise<GetDocumentByCitationResponse> {
     const response = await fetch(
-      `${this.baseUrl}/doc-citation?projectId=${projectId}&citation=${encodeURIComponent(
+      `${
+        this.baseUrl
+      }/doc-citation?projectId=${projectId}&citation=${encodeURIComponent(
         citation
       )}`
     );
@@ -82,9 +85,7 @@ class PIAChatAPI {
   /* -------------------- Documents -------------------- */
 
   async getPiaDocs(projectId: string): Promise<PiaDocument[]> {
-    const response = await fetch(
-      `${this.baseUrl}/docs?projectId=${projectId}`
-    );
+    const response = await fetch(`${this.baseUrl}/docs?projectId=${projectId}`);
 
     if (!response.ok) {
       const error = await response.json();
@@ -145,9 +146,7 @@ class PIAChatAPI {
 
   /* -------------------- PIA Modify -------------------- */
 
-  async modifyResponse(
-    payload: ModifyPiaPayload
-  ): Promise<ModifyPiaResponse> {
+  async modifyResponse(payload: ModifyPiaPayload): Promise<ModifyPiaResponse> {
     const response = await fetch("/api/pia/modify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -162,12 +161,14 @@ class PIAChatAPI {
     return response.json();
   }
 
-
-  async acceptDraft(messageId: string): Promise<ChatMessage> {
+  async acceptDraft(
+    messageId: string,
+    action?: "replace" | "append"
+  ): Promise<ChatMessage> {
     const response = await fetch(`${this.baseUrl}/accept-draft`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messageId }),
+      body: JSON.stringify({ messageId, action }),
     });
 
     if (!response.ok) {
@@ -182,8 +183,6 @@ class PIAChatAPI {
     };
   }
 
-
-
   async getProgress(sessionId: string): Promise<PiaProgressResponse> {
     const response = await fetch(
       `${this.baseUrl}/progress?session_id=${sessionId}`
@@ -197,8 +196,5 @@ class PIAChatAPI {
     return response.json();
   }
 }
-
-
-
 
 export const piaChatApi = new PIAChatAPI();

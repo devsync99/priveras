@@ -6,7 +6,7 @@ import { ChatPanel } from "@/components/pia/chat-panel";
 import { DocumentPanel } from "@/components/pia/document-panel";
 import { PIAActionsBar } from "@/components/pia/pia-actions-bar";
 import { useUIStore } from "@/lib/store/ui-store";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useProjects } from "@/lib/hooks/use-projects";
 
 interface PIAAssistantProps {
@@ -24,6 +24,8 @@ export function PIAAssistant({ session }: PIAAssistantProps) {
 
   const { data: projects, refetch: refetchProjects } = useProjects();
   const [currentProject, setCurrentProject] = useState<any>(null);
+  const chatPanelRef = useRef<any>(null);
+  const [sectionRefreshTrigger, setSectionRefreshTrigger] = useState(0);
 
   useEffect(() => {
     useUIStore.persist.rehydrate();
@@ -40,6 +42,15 @@ export function PIAAssistant({ session }: PIAAssistantProps) {
 
   const handleStatusChange = () => {
     refetchProjects();
+    // Trigger section statuses refresh
+    setSectionRefreshTrigger((prev) => prev + 1);
+  };
+
+  const handleStepClick = (label: string, value: string) => {
+    // Call the handleSectionClick from ChatPanel
+    if (chatPanelRef.current?.handleSectionClick) {
+      chatPanelRef.current.handleSectionClick(label, value);
+    }
   };
 
   return (
@@ -52,6 +63,8 @@ export function PIAAssistant({ session }: PIAAssistantProps) {
           setSelectedProject={setSelectedProject}
           isOpen={isSidebarOpen}
           setIsOpen={setIsSidebarOpen}
+          onStepClick={handleStepClick}
+          refreshTrigger={sectionRefreshTrigger}
         />
 
         {/* Dynamic Content Based on View */}
@@ -59,6 +72,7 @@ export function PIAAssistant({ session }: PIAAssistantProps) {
           {/* Chat Panel */}
           {(piaView === "chat" || piaView === "split") && (
             <ChatPanel
+              ref={chatPanelRef}
               session={session}
               selectedProject={selectedProject}
               isSidebarOpen={isSidebarOpen}

@@ -98,6 +98,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Helper to remove citations from text
+function removeCitationsFromText(text: string): string {
+  return text.replace(/\[[^\]]+\]/g, "").trim();
+}
+
 function generateMarkdown(project: any): string {
   const now = new Date().toLocaleDateString();
 
@@ -127,7 +132,8 @@ ${
       section.updatedAt
     ).toLocaleDateString()}\n\n`;
     markdown += `### Content\n\n`;
-    markdown += section.content;
+    // Remove citations from exported content
+    markdown += removeCitationsFromText(section.content);
     markdown += `\n\n---\n\n`;
   });
 
@@ -209,7 +215,7 @@ function generateHTML(project: any): string {
       ).toLocaleDateString()}
     </div>
     <div class="content">
-      ${section.content}
+      ${removeCitationsFromText(section.content)}
     </div>
   </div>
 `;
@@ -254,7 +260,12 @@ function generatePlainText(project: any): string {
       section.updatedAt
     ).toLocaleDateString()}\n\n`;
     text += `CONTENT:\n`;
-    text += section.content.replace(/<[^>]*>/g, ""); // Strip HTML tags
+    // Remove citations and strip HTML tags
+    const cleanContent = removeCitationsFromText(section.content).replace(
+      /<[^>]*>/g,
+      ""
+    );
+    text += cleanContent;
     text += `\n\n${"=".repeat(80)}\n\n`;
   });
 

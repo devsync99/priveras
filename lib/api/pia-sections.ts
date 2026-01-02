@@ -2,12 +2,39 @@
 import type { PIASection } from "@/lib/types";
 
 export const piaSectionsApi = {
+  // Check if section exists and is accepted
+  checkSection: async (
+    projectId: string,
+    sectionType: string
+  ): Promise<{
+    exists: boolean;
+    isAccepted: boolean;
+    sectionId?: string;
+    sectionName?: string;
+  }> => {
+    const response = await fetch(
+      `/api/pia/sections/check?projectId=${projectId}&sectionType=${encodeURIComponent(
+        sectionType
+      )}`
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.error || `Failed to check section: ${response.statusText}`
+      );
+    }
+
+    return response.json();
+  },
+
   // Generate a new PIA section
   generateSection: async (
     projectId: string,
     sectionType: string,
     sectionName: string,
-    query: string
+    query: string,
+    action?: "replace" | "append"
   ): Promise<PIASection> => {
     const response = await fetch("/api/pia/generate", {
       method: "POST",
@@ -17,6 +44,7 @@ export const piaSectionsApi = {
         sectionType,
         sectionName,
         query,
+        action,
       }),
     });
 
@@ -44,6 +72,27 @@ export const piaSectionsApi = {
 
     const data = await response.json();
     return data.sections;
+  },
+
+  // Get section statuses for all PIA steps
+  getSectionStatuses: async (
+    projectId: string
+  ): Promise<{
+    [sectionType: string]: { exists: boolean; isAccepted: boolean };
+  }> => {
+    const response = await fetch(
+      `/api/pia/sections/status?projectId=${projectId}`
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.error ||
+          `Failed to fetch section statuses: ${response.statusText}`
+      );
+    }
+
+    return response.json();
   },
 
   // Get a specific section with history
@@ -115,7 +164,4 @@ export const piaSectionsApi = {
     const data = await response.json();
     return data;
   },
-
- 
-
 };

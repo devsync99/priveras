@@ -15,7 +15,10 @@ interface TextWithCitationsProps {
   projectId: string;
 }
 
-const TextWithCitations: React.FC<TextWithCitationsProps> = ({ children, projectId }) => {
+const TextWithCitations: React.FC<TextWithCitationsProps> = ({
+  children,
+  projectId,
+}) => {
   if (!children) return null;
 
   const handleCitationClick = async (citation: string) => {
@@ -34,21 +37,51 @@ const TextWithCitations: React.FC<TextWithCitationsProps> = ({ children, project
   return React.Children.map(children, (child) => {
     if (typeof child === "string") {
       const parts = child.split(/(\[[^\]]+\])/g).filter(Boolean);
-      return parts.map((part, idx) => {
+      const elements: React.ReactNode[] = [];
+
+      parts.forEach((part, idx) => {
         const isCitation = /^\[[^\]]+\]$/.test(part);
         if (isCitation) {
-          return (
+          // Extract document name from citation
+          const citationText = part.replace(/[\[\]]/g, "");
+          // Try to extract document name (before comma or page reference)
+          const docName = citationText.split(",")[0].trim();
+
+          // Display as a clickable pill with icon and document name (ChatGPT style)
+          elements.push(
             <span
               key={idx}
-              className="text-blue-800 dark:text-blue-400 hover:underline cursor-pointer font-medium transition-colors hover:text-blue-900 dark:hover:text-blue-300"
+              className="inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-full cursor-pointer transition-all text-xs align-middle border border-blue-200 dark:border-blue-800"
               onClick={() => handleCitationClick(part)}
+              title={citationText}
             >
+              <svg
+                className="w-3 h-3 text-gray-600 dark:text-gray-300"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <span className="text-gray-700 dark:text-gray-200 font-medium max-w-[200px] truncate">
+                {docName}
+              </span>
+            </span>
+          );
+        } else {
+          elements.push(
+            <span key={idx} className="text-gray-800 dark:text-gray-200">
               {part}
             </span>
           );
         }
-        return <span key={idx} className="text-gray-800 dark:text-gray-200">{part}</span>;
       });
+
+      return elements;
     }
     return child;
   });
@@ -83,14 +116,10 @@ const getMarkdownComponents = (projectId: string): Components => ({
             : "m-0 mb-1 leading-relaxed text-gray-800 dark:text-gray-200"
         }
       >
-        <TextWithCitations projectId={projectId}>
-          {children}
-        </TextWithCitations>
+        <TextWithCitations projectId={projectId}>{children}</TextWithCitations>
       </p>
     );
   },
-
-
 
   blockquote: ({ children }) => (
     <blockquote className="border-l-4 border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-4 py-2 rounded-r-md text-sm italic my-3">
@@ -145,7 +174,10 @@ interface MarkdownMessageProps {
   content?: string;
 }
 
-const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ projectId, content }) => {
+const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
+  projectId,
+  content,
+}) => {
   if (!content) return null;
 
   // No section break - render normally

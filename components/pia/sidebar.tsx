@@ -22,6 +22,8 @@ import {
   useDeleteProject,
 } from "@/lib/hooks/use-projects";
 import type { Project } from "@/lib/api/projects";
+import { PIAStepsAccordion, PIAStep } from "./pia-steps-accordion";
+import { piaSectionsApi } from "@/lib/api/pia-sections";
 
 interface SidebarProps {
   session: any;
@@ -29,6 +31,8 @@ interface SidebarProps {
   setSelectedProject: (id: string | null) => void;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
+  onStepClick?: (label: string, value: string) => void;
+  refreshTrigger?: number; // Add trigger for refreshing section statuses
 }
 
 export function Sidebar({
@@ -37,16 +41,102 @@ export function Sidebar({
   setSelectedProject,
   isOpen,
   setIsOpen,
+  onStepClick,
+  refreshTrigger,
 }: SidebarProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [newProjectTitle, setNewProjectTitle] = useState("");
+  const [sectionStatuses, setSectionStatuses] = useState<{
+    [projectId: string]: {
+      [sectionType: string]: { exists: boolean; isAccepted: boolean };
+    };
+  }>({});
 
   // React Query hooks
   const { data: projects = [], isLoading } = useProjects();
   const createProjectMutation = useCreateProject();
   const deleteProjectMutation = useDeleteProject();
+
+  // Define the 12 PIA steps
+  const piaSteps = [
+    {
+      label: "1. Executive Summary Section",
+      value: "Executive Summary Section",
+    },
+    { label: "2. Introduction Section", value: "Introduction Section" },
+    { label: "3. Project Description", value: "Project Description" },
+    {
+      label: "4. Scope of the Privacy Analysis",
+      value: "Scope of the Privacy Analysis",
+    },
+    { label: "5. Business Processes", value: "Business Processes" },
+    {
+      label: "6. IT Systems & Applications",
+      value: "IT Systems & Applications",
+    },
+    {
+      label: "7. Data Flow & Data Handling",
+      value: "Data Flow & Data Handling",
+    },
+    { label: "8. Access Controls", value: "Access Controls" },
+    { label: "9. Security Assessments", value: "Security Assessments" },
+    {
+      label: "10. Privacy Summary or Analysis",
+      value: "Privacy Summary or Analysis",
+    },
+    {
+      label: "11. Risk Assessment & Mitigation",
+      value: "Risk Assessment & Mitigation",
+    },
+    { label: "12. Appendices", value: "Appendices" },
+  ];
+
+  // Load section statuses for all projects
+  const loadSectionStatuses = async () => {
+    const statusesMap: {
+      [projectId: string]: {
+        [sectionType: string]: { exists: boolean; isAccepted: boolean };
+      };
+    } = {};
+
+    for (const project of projects) {
+      try {
+        const statuses = await piaSectionsApi.getSectionStatuses(project.id);
+        statusesMap[project.id] = statuses;
+      } catch (error) {
+        console.error(
+          `Failed to load statuses for project ${project.id}:`,
+          error
+        );
+        statusesMap[project.id] = {};
+      }
+    }
+
+    setSectionStatuses(statusesMap);
+  };
+
+  // Load section statuses when projects change
+  useEffect(() => {
+    if (projects.length > 0) {
+      loadSectionStatuses();
+    }
+  }, [projects.length]);
+
+  // Reload section statuses when selected project changes
+  useEffect(() => {
+    if (selectedProject) {
+      loadSectionStatuses();
+    }
+  }, [selectedProject]);
+
+  // Reload section statuses when refreshTrigger changes
+  useEffect(() => {
+    if (refreshTrigger !== undefined && projects.length > 0) {
+      loadSectionStatuses();
+    }
+  }, [refreshTrigger]);
 
   // Auto-select first project if none selected
   useEffect(() => {
@@ -199,91 +289,118 @@ export function Sidebar({
             </div>
           ) : (
             <div className="space-y-2">
-              {projects.map((project) => (
-                <div
-                  key={project.id}
-                  onClick={() => setSelectedProject(project.id)}
-                  className={`
-                    relative group w-full text-left lg:rounded-lg transition-all cursor-pointer
-                    ${isOpen ? "p-3" : "p-0"}
-                    ${
-                      selectedProject === project.id
-                        ? "bg-blue-50 border-2 border-blue-200"
-                        : "bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50/50"
-                    }
-                  `}
-                  title={!isOpen ? project.projectTitle : undefined}
-                >
-                  {isOpen ? (
-                    // Expanded View
-                    <>
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`
-                            w-10 h-10 rounded-lg flex items-center justify-center shrink-0
-                            ${
-                              selectedProject === project.id
-                                ? "bg-blue-100"
-                                : "bg-gray-100"
-                            }
-                          `}
-                        >
-                          <Folder
-                            className={`w-5 h-5 ${
-                              selectedProject === project.id
-                                ? "text-blue-600"
-                                : "text-gray-600"
-                            }`}
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-sm font-medium text-gray-900 truncate mb-1">
-                            {project.projectTitle}
-                          </h4>
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                                project.status
-                              )}`}
+              {projects.map((project) => {
+                // Get steps with status for this project
+                const projectStatuses = sectionStatuses[project.id] || {};
+                const stepsWithStatus: PIAStep[] = piaSteps.map((step) => ({
+                  label: step.label,
+                  value: step.value,
+                  isAccepted: projectStatuses[step.value]?.isAccepted || false,
+                }));
+
+                return (
+                  <div
+                    key={project.id}
+                    className={`
+                      relative w-full text-left lg:rounded-lg transition-all overflow-hidden
+                      ${
+                        selectedProject === project.id
+                          ? "bg-blue-50 border-2 border-blue-200"
+                          : "bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50/50"
+                      }
+                    `}
+                  >
+                    <div
+                      onClick={() => setSelectedProject(project.id)}
+                      className={`
+                        group w-full cursor-pointer
+                        ${isOpen ? "p-3" : "p-0"}
+                      `}
+                      title={!isOpen ? project.projectTitle : undefined}
+                    >
+                      {isOpen ? (
+                        // Expanded View
+                        <>
+                          <div className="flex items-start gap-3">
+                            <div
+                              className={`
+                                w-10 h-10 rounded-lg flex items-center justify-center shrink-0
+                                ${
+                                  selectedProject === project.id
+                                    ? "bg-blue-100"
+                                    : "bg-gray-100"
+                                }
+                              `}
                             >
-                              {project.status}
-                            </span>
+                              <Folder
+                                className={`w-5 h-5 ${
+                                  selectedProject === project.id
+                                    ? "text-blue-600"
+                                    : "text-gray-600"
+                                }`}
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-medium text-gray-900 truncate mb-1">
+                                {project.projectTitle}
+                              </h4>
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                                    project.status
+                                  )}`}
+                                >
+                                  {project.status}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          {/* Delete Button - Only show when expanded */}
+                          <button
+                            onClick={(e) => openDeleteModal(project, e)}
+                            className="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 z-10"
+                            title="Delete project"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        // Collapsed View - Show first letter
+                        <div className="flex justify-center">
+                          <div
+                            className={`
+                              w-10 h-10 rounded-lg flex items-center justify-center
+                              font-semibold text-sm
+                              ${
+                                selectedProject === project.id
+                                  ? "bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-md"
+                                  : "bg-linear-to-br from-gray-100 to-gray-200 text-gray-700 hover:from-blue-100 hover:to-blue-200"
+                              }
+                              transition-all duration-200
+                            `}
+                          >
+                            {project.projectTitle.charAt(0).toUpperCase()}
                           </div>
                         </div>
-                        {selectedProject === project.id && (
-                          <ChevronRight className="w-5 h-5 text-blue-600 shrink-0" />
-                        )}
-                      </div>
-                      {/* Delete Button - Only show when expanded */}
-                      <button
-                        onClick={(e) => openDeleteModal(project, e)}
-                        className="absolute bottom-2 right-2 p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors opacity-0 group-hover:opacity-100"
-                        title="Delete project"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : (
-                    // Collapsed View - Show first letter
-                    <div className="flex justify-center">
-                      <div
-                        className={`
-                          w-10 h-10 rounded-lg flex items-center justify-center
-                          font-semibold text-sm
-                          ${
-                            selectedProject === project.id
-                              ? "bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-md"
-                              : "bg-linear-to-br from-gray-100 to-gray-200 text-gray-700 hover:from-blue-100 hover:to-blue-200"
-                          }
-                          transition-all duration-200
-                        `}
-                      >
-                        {project.projectTitle.charAt(0).toUpperCase()}
-                      </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {/* PIA Steps Accordion - Only show when project is selected, sidebar is expanded, and project has started */}
+                    {selectedProject === project.id &&
+                      isOpen &&
+                      onStepClick &&
+                      project.status !== "Not Started" && (
+                        <PIAStepsAccordion
+                          projectId={project.id}
+                          steps={stepsWithStatus}
+                          onStepClick={onStepClick}
+                          isExpanded={isOpen}
+                          isCompleted={project.status === "Completed"}
+                        />
+                      )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

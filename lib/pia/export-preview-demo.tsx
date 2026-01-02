@@ -5,6 +5,19 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUIStore } from "@/lib/store/ui-store";
 
+// Helper function to remove citations from content
+const removeCitations = (children: React.ReactNode): React.ReactNode => {
+  if (!children) return children;
+
+  return React.Children.map(children, (child) => {
+    if (typeof child === "string") {
+      // Remove all citations like [Source 14, Page 1-23] or [HRAS Case Management...]
+      return child.replace(/\[[^\]]+\]/g, "").trim();
+    }
+    return child;
+  });
+};
+
 interface ChatMessage {
   id: string;
   type: string;
@@ -22,9 +35,7 @@ const ExportPreview = ({
 }) => {
   const [acceptedMessages, setAcceptedMessages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const documentRefreshKey = useUIStore(
-    (state) => state.documentRefreshKey
-  );
+  const documentRefreshKey = useUIStore((state) => state.documentRefreshKey);
 
   useEffect(() => {
     onAcceptedChange(acceptedMessages);
@@ -76,8 +87,8 @@ const ExportPreview = ({
             No Accepted Drafts Yet
           </h3>
           <p className="text-gray-600">
-            Start accepting draft sections from the chat to build your PIA document. 
-            Accepted drafts will appear here and can be exported.
+            Start accepting draft sections from the chat to build your PIA
+            document. Accepted drafts will appear here and can be exported.
           </p>
         </div>
       </div>
@@ -104,19 +115,24 @@ const ExportPreview = ({
               components={{
                 h2: ({ children }) => (
                   <h2 className="text-2xl font-semibold text-emerald-700 mt-8 mb-4 border-b pb-2">
-                    {children}
+                    {removeCitations(children)}
                   </h2>
                 ),
                 h3: ({ children }) => (
                   <h3 className="text-xl font-medium text-gray-800 mt-6 mb-3">
-                    {children}
+                    {removeCitations(children)}
                   </h3>
                 ),
                 p: ({ children }) => (
                   <p className="text-gray-800 leading-7 mb-4">
-                    {children}
+                    {removeCitations(children)}
                   </p>
                 ),
+                strong: ({ children }) => (
+                  <strong>{removeCitations(children)}</strong>
+                ),
+                em: ({ children }) => <em>{removeCitations(children)}</em>,
+                li: ({ children }) => <li>{removeCitations(children)}</li>,
                 table: ({ children }) => (
                   <table className="w-full border border-gray-300 border-collapse my-6 text-sm">
                     {children}
@@ -124,12 +140,12 @@ const ExportPreview = ({
                 ),
                 th: ({ children }) => (
                   <th className="border px-4 py-2 bg-gray-100 font-semibold">
-                    {children}
+                    {removeCitations(children)}
                   </th>
                 ),
                 td: ({ children }) => (
                   <td className="border px-4 py-2 align-top">
-                    {children}
+                    {removeCitations(children)}
                   </td>
                 ),
               }}

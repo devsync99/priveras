@@ -72,6 +72,7 @@ model PIASection {
   // Relations
   project PIAProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
   history PIASectionHistory[]
+  messages PIAChatMessage[]
   
   @@index([projectId])
   @@index([sectionType])
@@ -105,8 +106,13 @@ model PIAChatMessage {
   isActionResponse Boolean @default(false)
   isDraftAccepted Boolean @default(false)
   isSectionSteps Boolean @default(false)
+  sectionId    String?  // Link to PIASection if this message is for a section
   createdAt    DateTime @default(now())
   
+  // Relations
+  section PIASection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  
   @@index([projectId])
+  @@index([sectionId])
   @@map("pia_chat_messages")
 }

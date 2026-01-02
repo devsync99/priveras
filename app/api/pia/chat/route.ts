@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
       status,
       isActionResponse,
       isSectionSteps,
+      sectionId,
     } = body;
 
     if (!projectId || !type || !content) {
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
         status: status || null,
         isActionResponse: isActionResponse || false,
         isSectionSteps: isSectionSteps || false,
+        sectionId: sectionId || null,
       },
     });
 
@@ -171,5 +173,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-
-
